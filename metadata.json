@@ -1,0 +1,6 @@
+{
+  "name": "Victor Win - Online Gaming & Sportsbook",
+  "description": "Premium online gaming, colour prediction, aviator, slots, live casino and sports betting platform with high performance blue theme.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

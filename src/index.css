@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', 'Hind Siliguri', sans-serif;
+  }
+  
+  h1, h2, h3, .font-display {
+    font-family: 'Outfit', 'Hind Siliguri', sans-serif;
+  }
+
+  .font-teko {
+    font-family: 'Teko', sans-serif;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #080e21;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e3a8a;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2563eb;
+}
+
+/* BlueHome Glass & Gradients */
+.blue-card {
+  background: linear-gradient(135deg, rgba(15, 29, 66, 0.95) 0%, rgba(10, 20, 48, 0.98) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px 0 rgba(37, 99, 235, 0.1);
+}
+
+.blue-card-hover {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.blue-card-hover:hover {
+  transform: translateY(-2px);
+  border-color: rgba(96, 165, 250, 0.5);
+  box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6), 0 0 25px 2px rgba(59, 130, 246, 0.25);
+}
+
+.glow-blue {
+  box-shadow: 0 0 20px rgba(37, 99, 235, 0.35);
+}
+
+.glow-gold {
+  box-shadow: 0 0 20px rgba(234, 179, 8, 0.4);
+}
+
+/* VerifyInput OTP box styling */
+.verify-input-box {
+  background: #0d1b3e;
+  border: 1.5px solid rgba(59, 130, 246, 0.3);
+  transition: all 0.2s ease;
+}
+.verify-input-box:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+  background: #132454;
+  outline: none;
+}
+
+/* Win Go Number Balls */
+.ball-green {
+  background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.4);
+}
+.ball-red {
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  box-shadow: 0 4px 10px rgba(239, 68, 68, 0.4);
+}
+.ball-violet {
+  background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%);
+  box-shadow: 0 4px 10px rgba(168, 85, 247, 0.4);
+}
+.ball-red-violet {
+  background: linear-gradient(135deg, #ef4444 50%, #a855f7 50%);
+  box-shadow: 0 4px 10px rgba(239, 68, 68, 0.3);
+}
+.ball-green-violet {
+  background: linear-gradient(135deg, #10b981 50%, #a855f7 50%);
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+}
+
+/* Smooth Marquee ticker */
+@keyframes marquee {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
+.animate-marquee {
+  display: inline-block;
+  white-space: nowrap;
+  animation: marquee 25s linear infinite;
+}
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* Aviator Flight Curve Canvas Grid */
+.aviator-grid {
+  background-size: 30px 30px;
+  background-image: 
+    linear-gradient(to right, rgba(59, 130, 246, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(59, 130, 246, 0.08) 1px, transparent 1px);
+}
