@@ -208,16 +208,22 @@ export function calculateAutomatedMarketResult(period: string, fallbackRngNumber
 /**
  * Calculate WinGo Draw Result deterministically or via Admin override
  */
-export function getWinGoDraw(roundIndex: number, durationSeconds: number): WinGoResult {
+export function getWinGoDraw(roundIndex: number, durationSeconds: number, isHistorical: boolean = false): WinGoResult {
   const period = formatPeriod(roundIndex, durationSeconds);
   const config = getLocalConfig();
   
   let number: number;
 
-  // 1. Check if Admin set an exact override for this specific period
-  if (config.marketControl?.winGoNextOverride?.period === period) {
-    number = config.marketControl.winGoNextOverride.number;
-  } else if (config.marketControl?.houseEdgeMode === 'custom_number' && typeof config.marketControl.targetCustomNumber === 'number' && config.marketControl.targetCustomNumber >= 0) {
+  // 1. Check if Admin set an exact override for this specific duration/period
+  // Overrides only apply if the period matches exactly
+  const durationOverride = config.marketControl?.winGoDurationOverrides?.[durationSeconds];
+  const nextOverride = config.marketControl?.winGoNextOverride;
+
+  if (durationOverride && durationOverride.period === period) {
+    number = durationOverride.number;
+  } else if (nextOverride && nextOverride.period === period) {
+    number = nextOverride.number;
+  } else if (!isHistorical && config.marketControl?.houseEdgeMode === 'custom_number' && typeof config.marketControl.targetCustomNumber === 'number' && config.marketControl.targetCustomNumber >= 0) {
     number = config.marketControl.targetCustomNumber % 10;
   } else {
     // High-entropy deterministic seed based on period index and game duration
@@ -230,8 +236,8 @@ export function getWinGoDraw(roundIndex: number, durationSeconds: number): WinGo
     const rawRngNumber = Math.floor(((r1 * 0.6180339887 + r2 * 0.3819660113) * 10) % 10);
 
     // If marketControl is in automated house-edge/profit-control mode or default auto,
-    // evaluate live bet amounts (less money wins rule)
-    if (config.marketControl?.houseEdgeMode === 'force_house_win' || config.marketControl?.houseEdgeMode === 'auto') {
+    // evaluate live bet amounts (less money wins rule) ONLY for active round, NEVER alter past history!
+    if (!isHistorical && (config.marketControl?.houseEdgeMode === 'force_house_win' || config.marketControl?.houseEdgeMode === 'auto')) {
       number = calculateAutomatedMarketResult(period, rawRngNumber);
     } else {
       number = rawRngNumber;
@@ -270,11 +276,12 @@ export function getRealtimeWinGo(durationSeconds: number, historyCount: number =
   const timeLeft = Math.max(1, Math.ceil((durationMs - elapsedInRoundMs) / 1000));
   const isFreeze = timeLeft <= 5;
 
-  // Generate requested number of past rounds deterministically
+  // Generate requested number of past rounds deterministically with isHistorical=true
+  // This guarantees that past rounds NEVER change when admin sets a custom number for the current period!
   const history: WinGoResult[] = [];
   for (let i = 1; i <= historyCount; i++) {
     const prevRoundIndex = currentRoundIndex - i;
-    history.push(getWinGoDraw(prevRoundIndex, durationSeconds));
+    history.push(getWinGoDraw(prevRoundIndex, durationSeconds, true));
   }
 
   return {
@@ -322,11 +329,12 @@ export function getWinGoPaginatedHistory(
 /**
  * Calculate deterministic or admin-overridden crash point for a given Aviator round
  */
-export function getAviatorRoundCrashPoint(roundIndex: number): number {
+export function getAviatorRoundCrashPoint(roundIndex: number, isHistorical: boolean = false): number {
   const config = getLocalConfig();
 
-  // 1. Check if Admin set an exact override
+  // 1. Check if Admin set an exact override (only for active cycle, not past history)
   if (
+    !isHistorical &&
     config.marketControl?.aviatorNextCrashOverride &&
     config.marketControl.aviatorNextCrashOverride > 1.0
   ) {
@@ -406,7 +414,7 @@ export function getRealtimeAviator() {
   const pastMultipliers: { id: number; multiplier: number }[] = [];
   for (let i = 1; i <= 16; i++) {
     const prevIdx = currentCycleIndex - i;
-    const prevCrash = getAviatorRoundCrashPoint(prevIdx);
+    const prevCrash = getAviatorRoundCrashPoint(prevIdx, true);
     pastMultipliers.push({
       id: prevIdx,
       multiplier: prevCrash,

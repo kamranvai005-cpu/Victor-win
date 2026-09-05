@@ -78,22 +78,33 @@ export function FirstDepositModal({
           </p>
         </div>
 
-        {/* Bonus Tier Value Cards */}
-        <div className="grid grid-cols-3 gap-2 bg-[#050a18] p-3 rounded-2xl border border-blue-500/30">
-          <div className="space-y-0.5">
-            <span className="text-[10px] text-slate-400 block font-bold">ডিপোজিট</span>
-            <span className="text-xs sm:text-sm font-black text-white font-mono">৳500</span>
-            <span className="text-[10px] text-emerald-400 font-bold block">+৳500 ফ্রি</span>
+        {/* Bonus Tier Value Cards - Specific Tier List */}
+        <div className="space-y-2">
+          <div className="text-[11px] font-bold text-amber-300 flex items-center justify-between px-1">
+            <span>ডিপোজিট রিচার্জ অফার তালিকা:</span>
+            <span className="text-emerald-400 font-mono">+১০% ইনস্ট্যান্ট এক্সট্রা</span>
           </div>
-          <div className="space-y-0.5 border-x border-blue-900/60">
-            <span className="text-[10px] text-slate-400 block font-bold">ডিপোজিট</span>
-            <span className="text-xs sm:text-sm font-black text-amber-300 font-mono">৳1,000</span>
-            <span className="text-[10px] text-emerald-400 font-bold block">+৳1,000 ফ্রি</span>
-          </div>
-          <div className="space-y-0.5">
-            <span className="text-[10px] text-slate-400 block font-bold">ডিপোজিট</span>
-            <span className="text-xs sm:text-sm font-black text-yellow-300 font-mono">৳5,000</span>
-            <span className="text-[10px] text-emerald-400 font-bold block">+৳5,000 ফ্রি</span>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#050a18] p-2.5 rounded-2xl border border-blue-500/30">
+            <div className="p-2 rounded-xl bg-[#091533] border border-blue-900/50 space-y-0.5">
+              <span className="text-[10px] text-slate-400 block font-bold">ডিপোজিট</span>
+              <span className="text-xs sm:text-sm font-black text-white font-mono">৳১০০</span>
+              <span className="text-[11px] text-emerald-400 font-bold block bg-emerald-500/10 rounded py-0.5">+৳১০ বোনাস</span>
+            </div>
+            <div className="p-2 rounded-xl bg-[#091533] border border-blue-900/50 space-y-0.5">
+              <span className="text-[10px] text-slate-400 block font-bold">ডিপোজিট</span>
+              <span className="text-xs sm:text-sm font-black text-amber-300 font-mono">৳৩০০</span>
+              <span className="text-[11px] text-emerald-400 font-bold block bg-emerald-500/10 rounded py-0.5">+৳৩০ বোনাস</span>
+            </div>
+            <div className="p-2 rounded-xl bg-[#091533] border border-blue-900/50 space-y-0.5">
+              <span className="text-[10px] text-slate-400 block font-bold">ডিপোজিট</span>
+              <span className="text-xs sm:text-sm font-black text-amber-300 font-mono">৳৫০০</span>
+              <span className="text-[11px] text-emerald-400 font-bold block bg-emerald-500/10 rounded py-0.5">+৳৫০ বোনাস</span>
+            </div>
+            <div className="p-2 rounded-xl bg-[#091533] border border-blue-900/50 space-y-0.5">
+              <span className="text-[10px] text-slate-400 block font-bold">ডিপোজিট</span>
+              <span className="text-xs sm:text-sm font-black text-yellow-300 font-mono">৳১,০০০</span>
+              <span className="text-[11px] text-emerald-400 font-bold block bg-emerald-500/10 rounded py-0.5">+৳১০০ বোনাস</span>
+            </div>
           </div>
         </div>
 

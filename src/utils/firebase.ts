@@ -11,18 +11,18 @@ import {
   query,
   orderBy,
   limit,
+  getDocs,
 } from 'firebase/firestore';
 
 // User-provided Firebase configuration
 export const firebaseConfig = {
-  apiKey: "AIzaSyBQiJXz2yBCwAXgaSQCeq8WJjSTZIrb_fw",
-  authDomain: "millionaire-bd.firebaseapp.com",
-  databaseURL: "https://millionaire-bd-default-rtdb.firebaseio.com",
-  projectId: "millionaire-bd",
-  storageBucket: "millionaire-bd.firebasestorage.app",
-  messagingSenderId: "662419906885",
-  appId: "1:662419906885:web:2d347e5fb099a111d35e2c",
-  measurementId: "G-3R2305V2TS"
+  apiKey: "AIzaSyAODjtgCTgZW6mAX1Qa8za7hfswC2pNu4s",
+  authDomain: "victor-win.firebaseapp.com",
+  projectId: "victor-win",
+  storageBucket: "victor-win.firebasestorage.app",
+  messagingSenderId: "214768486114",
+  appId: "1:214768486114:web:e2c2994eab8efda8ba80bb",
+  measurementId: "G-CXH7BYHFKX"
 };
 
 // Initialize or reuse Firebase App
@@ -101,6 +101,9 @@ export interface RegisteredMember {
   totalDeposit?: number;
   totalWon?: number;
   totalBet?: number;
+  referredBy?: string; // Invitation code or UID of referring member
+  referralCount?: number; // Total number of registrations using their code
+  referralDepositsCount?: number; // Total number of their referrals who made deposits
   paymentMode?: 'send_money' | 'cash_out'; // এডমিন প্যানেল থেকে সেট করা সেন্ড মানি নাকি ক্যাশ আউট
   withdrawalWallet?: {
     method: 'bkash' | 'nagad' | 'rocket' | 'upay' | 'bank';
@@ -124,7 +127,9 @@ export interface MarketControlSettings {
   winGoNextOverride?: {
     period: string;
     number: number;
+    duration?: number;
   } | null;
+  winGoDurationOverrides?: Record<number, { period: string; number: number }>;
   houseEdgeMode: 'auto' | 'auto_rng' | 'force_house_win' | 'force_player_win' | 'custom_number';
   targetCustomNumber: number;
   aiSignalEnabled?: boolean;
@@ -156,6 +161,7 @@ export interface SystemConfig {
   noticeText?: string;
   maintenanceMode?: boolean;
   firstDepositBonus?: FirstDepositBonusConfig;
+  appDownloadUrl?: string;
 }
 
 // Initial Default Values
@@ -278,6 +284,7 @@ export function getLocalConfig(): SystemConfig {
     },
     giftCodes: [], // Currently NO active gift codes as requested
     firstDepositBonus: DEFAULT_FIRST_DEPOSIT_BONUS,
+    appDownloadUrl: 'https://millionaire-bd.web.app/download/app-v2.apk',
   };
 }
 
@@ -450,6 +457,9 @@ export const DEFAULT_MEMBERS: RegisteredMember[] = [
     totalDeposit: 15000,
     totalWon: 18500,
     totalBet: 22000,
+    referredBy: 'MASTER_TOP',
+    referralCount: 14,
+    referralDepositsCount: 9,
   },
   {
     uid: 'VW774102',
@@ -474,6 +484,9 @@ export const DEFAULT_MEMBERS: RegisteredMember[] = [
     totalDeposit: 8000,
     totalWon: 9200,
     totalBet: 11500,
+    referredBy: 'VICTOR888',
+    referralCount: 6,
+    referralDepositsCount: 4,
   },
   {
     uid: 'VW990145',
@@ -498,6 +511,9 @@ export const DEFAULT_MEMBERS: RegisteredMember[] = [
     totalDeposit: 50000,
     totalWon: 62000,
     totalBet: 75000,
+    referredBy: 'VICTOR888',
+    referralCount: 22,
+    referralDepositsCount: 18,
   },
   {
     uid: 'VW665319',
@@ -522,6 +538,8 @@ export const DEFAULT_MEMBERS: RegisteredMember[] = [
     totalDeposit: 250000,
     totalWon: 310000,
     totalBet: 400000,
+    referralCount: 45,
+    referralDepositsCount: 38,
   },
   {
     uid: 'VW332187',
@@ -652,3 +670,152 @@ export function deleteLocalMember(uid: string) {
     localStorage.setItem(MEMBERS_STORAGE_KEY, JSON.stringify(updated));
   } catch (e) {}
 }
+
+// Live Firebase Connection Check
+export async function checkFirebaseLiveStatus(): Promise<{ connected: boolean; error?: string }> {
+  try {
+    const testDoc = doc(db, 'system', 'app_config');
+    const snapshot = await getDoc(testDoc);
+    return { connected: true };
+  } catch (err: any) {
+    console.warn('Firebase connection check notice:', err);
+    return {
+      connected: false,
+      error: err?.code === 'permission-denied'
+        ? 'Permission Denied: ফায়ারবেস রুলস লক করা আছে'
+        : err?.message || 'কানেকশন সমস্যা',
+    };
+  }
+}
+
+// Register user with strict Firebase validation
+export async function firebaseRegisterMember(
+  member: RegisteredMember
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  try {
+    // Attempt writing directly to Firebase Firestore
+    const userDocRef = doc(db, 'users', member.uid);
+    await setDoc(userDocRef, member, { merge: true });
+    
+    // Save to local cache as well
+    saveLocalMember(member);
+    return { success: true };
+  } catch (err: any) {
+    console.error('Firebase registration error:', err);
+    const isPermissionError = err?.code === 'permission-denied' || String(err).includes('permission-denied');
+    return {
+      success: false,
+      error: 'firebase_connection_failed',
+      message: isPermissionError
+        ? '⚠️ ফায়ারবেস ডাটাবেজের পারমিশন লক করা (Permission Denied)! অনুগ্রহ করে Firebase Console-এ গিয়ে Firestore Rules-এ `allow read, write: if true;` দিয়ে Publish করুন।'
+        : `⚠️ ফায়ারবেস ডাটাবেজ কানেক্ট হতে পারেনি (${err?.message || 'সার্ভার সংযোগ ব্যর্থ'})। অনুগ্রহ করে ইন্টারনেট ও ফায়ারবেস চেক করুন।`,
+    };
+  }
+}
+
+// Login user with strict Firebase validation
+export async function firebaseLoginMember(
+  identifier: string,
+  pass: string
+): Promise<{ success: boolean; user?: RegisteredMember; error?: string; message?: string; banned?: boolean; banReason?: string }> {
+  try {
+    const usersColRef = collection(db, 'users');
+    const snapshot = await getDocs(usersColRef);
+    const remoteMembers: RegisteredMember[] = [];
+    snapshot.forEach((d) => {
+      remoteMembers.push(d.data() as RegisteredMember);
+    });
+
+    const cleanDigits = identifier.replace(/\D/g, '');
+    const cleanLower = identifier.trim().toLowerCase();
+
+    // Check remote members from Firebase first
+    let user = remoteMembers.find((m) => {
+      const mDigits = (m.phone || '').replace(/\D/g, '');
+      return (
+        m.uid.toLowerCase() === cleanLower ||
+        m.phone === identifier ||
+        (m.email && m.email.toLowerCase() === cleanLower) ||
+        (cleanDigits.length >= 8 && mDigits.endsWith(cleanDigits.slice(-10)))
+      );
+    });
+
+    // If not found in remote, check local fallback
+    if (!user) {
+      const localMembers = getLocalMembers();
+      user = localMembers.find((m) => {
+        const mDigits = (m.phone || '').replace(/\D/g, '');
+        return (
+          m.uid.toLowerCase() === cleanLower ||
+          m.phone === identifier ||
+          (m.email && m.email.toLowerCase() === cleanLower) ||
+          (cleanDigits.length >= 8 && mDigits.endsWith(cleanDigits.slice(-10)))
+        );
+      });
+    }
+
+    if (!user) {
+      return {
+        success: false,
+        error: 'user_not_found',
+        message: '❌ এই অ্যাকাউন্টের কোনো তথ্য পাওয়া যায়নি! অনুগ্রহ করে আগে রেজিস্ট্রেশন করুন।',
+      };
+    }
+
+    if (user.status === 'banned') {
+      return {
+        success: false,
+        banned: true,
+        banReason: user.banReason || 'নিরাপত্তা পলিসি লঙ্ঘনের কারণে এই একাউন্ট স্থগিত',
+      };
+    }
+
+    if (user.password && user.password !== pass.trim()) {
+      return {
+        success: false,
+        error: 'invalid_password',
+        message: '❌ ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড প্রদান করুন।',
+      };
+    }
+
+    return { success: true, user };
+  } catch (err: any) {
+    console.error('Firebase login check error:', err);
+    const isPermissionError = err?.code === 'permission-denied' || String(err).includes('permission-denied');
+    return {
+      success: false,
+      error: 'firebase_connection_failed',
+      message: isPermissionError
+        ? '⚠️ ফায়ারবেস ডাটাবেজের পারমিশন লক করা (Permission Denied)! অনুগ্রহ করে Firebase Console-এ গিয়ে Firestore Rules-এ `allow read, write: if true;` দিয়ে Publish করুন।'
+        : `⚠️ ফায়ারবেস ডাটাবেজ কানেক্ট হতে পারেনি (${err?.message || 'সার্ভার সংযোগ ব্যর্থ'})।`,
+    };
+  }
+}
+
+// Real-time listener for Registered Members
+export function subscribeMembers(onUpdate: (members: RegisteredMember[]) => void) {
+  try {
+    const usersColRef = collection(db, 'users');
+    const unsubscribe = onSnapshot(
+      usersColRef,
+      (snapshot) => {
+        const remoteList: RegisteredMember[] = [];
+        snapshot.forEach((d) => {
+          remoteList.push(d.data() as RegisteredMember);
+        });
+        if (remoteList.length > 0) {
+          onUpdate(remoteList);
+          localStorage.setItem(MEMBERS_STORAGE_KEY, JSON.stringify(remoteList));
+        }
+      },
+      (error) => {
+        console.warn('Users snapshot error:', error.message);
+      }
+    );
+    return unsubscribe;
+  } catch (e) {
+    console.warn('Firebase users subscribe error:', e);
+    return () => {};
+  }
+}
+

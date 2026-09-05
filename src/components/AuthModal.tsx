@@ -1,11 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, X, ArrowRight, Lock, KeyRound, Sparkles, CheckCircle2, Mail, Phone, ShieldAlert, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, X, ArrowRight, Lock, KeyRound, Sparkles, CheckCircle2, Mail, Phone, ShieldAlert, AlertTriangle, Database, RefreshCw } from 'lucide-react';
 import { PhoneInput } from './PhoneInput';
 import { VerifyInput } from './VerifyInput';
 import { UserProfile } from '../types';
 import { sound } from '../utils/audio';
-import { saveLocalMember, getLocalMembers, updateLocalMember } from '../utils/firebase';
+import {
+  saveLocalMember,
+  getLocalMembers,
+  updateLocalMember,
+  firebaseRegisterMember,
+  firebaseLoginMember,
+  checkFirebaseLiveStatus,
+  RegisteredMember,
+} from '../utils/firebase';
 import { getClientDeviceDetails } from '../utils/deviceInfo';
+import { getAvatarForUser } from '../utils/avatars';
 import { BrandLogo } from './BrandLogo';
 import { UserBanModal } from './UserBanModal';
 
@@ -30,6 +39,26 @@ export function AuthModal({ initialMode, onClose, onLoginSuccess }: AuthModalPro
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [logoTaps, setLogoTaps] = useState<number>(0);
   const [bannedUserPrompt, setBannedUserPrompt] = useState<{ uid: string; reason: string } | null>(null);
+
+  // Live Firebase connection state
+  const [firebaseStatus, setFirebaseStatus] = useState<'checking' | 'connected' | 'error'>('checking');
+  const [firebaseErrorMessage, setFirebaseErrorMessage] = useState<string>('');
+
+  const verifyFirebase = async () => {
+    setFirebaseStatus('checking');
+    const res = await checkFirebaseLiveStatus();
+    if (res.connected) {
+      setFirebaseStatus('connected');
+      setFirebaseErrorMessage('');
+    } else {
+      setFirebaseStatus('error');
+      setFirebaseErrorMessage(res.error || 'ফায়ারবেস পারমিশন সমস্যা');
+    }
+  };
+
+  useEffect(() => {
+    verifyFirebase();
+  }, []);
 
   // Auto-detect referral code from URL search query (?ref=..., ?invite=..., ?code=...)
   useEffect(() => {
@@ -71,7 +100,7 @@ export function AuthModal({ initialMode, onClose, onLoginSuccess }: AuthModalPro
     }
   };
 
-  const handleAuthSubmit = (e: React.FormEvent) => {
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Check if logging in via email
@@ -86,79 +115,64 @@ export function AuthModal({ initialMode, onClose, onLoginSuccess }: AuthModalPro
       }
 
       setIsSubmitting(true);
-      setTimeout(() => {
-        const cleanEmail = email.trim().toLowerCase();
-        const isAdmin =
-          (cleanEmail === 'admin@gmail.com' || cleanEmail === 'admin') &&
-          (password === 'admin' || password === 'admin888' || password === 'victor888');
+      const cleanEmail = email.trim().toLowerCase();
+      const isAdmin =
+        (cleanEmail === 'admin@gmail.com' || cleanEmail === 'admin') &&
+        (password === 'admin' || password === 'admin888' || password === 'victor888');
 
-        if (isAdmin) {
-          sound.playWin();
-          // Super Admin Login
-          onLoginSuccess({
-            id: 'VW_SUPER_ADMIN',
-            email: 'admin@gmail.com',
-            phone: '01700000000',
-            countryCode: '+880',
-            username: 'Master_Admin',
-            balance: 99999.00,
-            vipLevel: 10,
-            role: 'admin',
-            isLoggedIn: true,
-            invitationCode: 'VICTOR888',
-          });
-          setIsSubmitting(false);
-          onClose();
-          return;
-        }
-
-        // Check registered member
-        const members = getLocalMembers();
-        const existingMember = members.find((m) => m.phone.toLowerCase() === cleanEmail || m.email?.toLowerCase() === cleanEmail);
-        
-        if (!existingMember) {
-          setIsSubmitting(false);
-          sound.playLose();
-          setError('❌ এই ইমেইলে কোনো একাউন্ট পাওয়া যায়নি! অনুগ্রহ করে আগে রেজিস্ট্রেশন করুন।');
-          return;
-        }
-
-        // Check if user is banned
-        if (existingMember.status === 'banned') {
-          setIsSubmitting(false);
-          sound.playLose();
-          setBannedUserPrompt({
-            uid: existingMember.uid,
-            reason: existingMember.banReason || 'একাধিক অ্যাকাউন্ট তৈরি বা সিকিউরিটি পলিসি লঙ্ঘনের কারণে এই একাউন্ট স্থগিত',
-          });
-          return;
-        }
-
-        // Strict Password Check
-        if (existingMember.password && existingMember.password !== password.trim()) {
-          setIsSubmitting(false);
-          sound.playLose();
-          setError('❌ ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড প্রদান করুন।');
-          return;
-        } else if (!existingMember.password) {
-          updateLocalMember(existingMember.uid, { password: password.trim() });
-        }
-
+      if (isAdmin) {
         sound.playWin();
         onLoginSuccess({
-          id: existingMember.uid,
-          email: existingMember.email || cleanEmail,
-          phone: existingMember.phone,
-          countryCode: existingMember.countryCode || '',
-          username: existingMember.username,
-          balance: existingMember.balance || 0.00,
-          role: 'user',
+          id: 'VW_SUPER_ADMIN',
+          email: 'admin@gmail.com',
+          phone: '01700000000',
+          countryCode: '+880',
+          username: 'Master_Admin',
+          balance: 99999.0,
+          vipLevel: 10,
+          role: 'admin',
           isLoggedIn: true,
-          invitationCode: existingMember.invitationCode || 'VICTOR888',
+          invitationCode: 'VICTOR888',
         });
         setIsSubmitting(false);
         onClose();
-      }, 500);
+        return;
+      }
+
+      // Check login via Firebase
+      const loginRes = await firebaseLoginMember(cleanEmail, password);
+      setIsSubmitting(false);
+
+      if (!loginRes.success) {
+        sound.playLose();
+        if (loginRes.banned) {
+          setBannedUserPrompt({
+            uid: loginRes.user?.uid || 'USER',
+            reason: loginRes.banReason || 'সিকিউরিটি পলিসি লঙ্ঘনের কারণে এই একাউন্ট স্থগিত',
+          });
+        } else {
+          setError(loginRes.message || 'লগইন ব্যর্থ হয়েছে');
+        }
+        return;
+      }
+
+      const existingMember = loginRes.user!;
+      const userAvatar = existingMember.avatar || getAvatarForUser(existingMember.uid, existingMember.gender);
+      sound.playWin();
+      onLoginSuccess({
+        id: existingMember.uid,
+        email: existingMember.email || cleanEmail,
+        phone: existingMember.phone,
+        countryCode: existingMember.countryCode || '',
+        username: existingMember.username,
+        avatar: userAvatar,
+        balance: existingMember.balance || 0.0,
+        vipLevel: existingMember.vipLevel || 1,
+        role: 'user',
+        isLoggedIn: true,
+        invitationCode: existingMember.invitationCode || 'VICTOR888',
+      });
+      onClose();
       return;
     }
 
@@ -175,166 +189,133 @@ export function AuthModal({ initialMode, onClose, onLoginSuccess }: AuthModalPro
       }
 
       setIsSubmitting(true);
-      setTimeout(() => {
-        const cleanPhoneDigits = phone.replace(/\D/g, '');
-        const fullPhone = `${countryCode}${cleanPhoneDigits.startsWith('0') ? cleanPhoneDigits : '0' + cleanPhoneDigits}`;
-        const last10Digits = cleanPhoneDigits.slice(-10);
+      const cleanPhoneDigits = phone.replace(/\D/g, '');
+      const fullPhone = `${countryCode}${cleanPhoneDigits.startsWith('0') ? cleanPhoneDigits : '0' + cleanPhoneDigits}`;
 
-        // Check if admin login credentials
-        const isAdmin =
-          (phone.toLowerCase() === 'admin' || cleanPhoneDigits === '01700000000' || cleanPhoneDigits === '1700000000') &&
-          (password === 'admin888' || password === 'admin' || password === 'victor888');
+      // Check if admin login credentials
+      const isAdmin =
+        (phone.toLowerCase() === 'admin' || cleanPhoneDigits === '01700000000' || cleanPhoneDigits === '1700000000') &&
+        (password === 'admin888' || password === 'admin' || password === 'victor888');
 
-        if (isAdmin) {
-          sound.playWin();
-          onLoginSuccess({
-            id: 'VW_SUPER_ADMIN',
-            phone: '01700000000',
-            countryCode: '+880',
-            username: 'Master_Admin',
-            balance: 99999.00,
-            vipLevel: 10,
-            role: 'admin',
-            isLoggedIn: true,
-            invitationCode: 'VICTOR888',
-          });
-          setIsSubmitting(false);
-          onClose();
-          return;
-        }
-
-        // Check registered members in system
-        const members = getLocalMembers();
-        const existingMember = members.find((m) => {
-          const mDigits = m.phone.replace(/\D/g, '');
-          return (
-            m.phone === fullPhone ||
-            m.phone === phone ||
-            mDigits === cleanPhoneDigits ||
-            (last10Digits.length >= 10 && mDigits.endsWith(last10Digits))
-          );
-        });
-
-        // User MUST exist in the registered member database
-        if (!existingMember) {
-          setIsSubmitting(false);
-          sound.playLose();
-          setError('❌ এই নম্বরে কোনো অ্যাকাউন্ট পাওয়া যায়নি! অনুগ্রহ করে আগে রেজিস্ট্রেশন করুন।');
-          return;
-        }
-
-        // Check if user is banned
-        if (existingMember.status === 'banned') {
-          setIsSubmitting(false);
-          sound.playLose();
-          setBannedUserPrompt({
-            uid: existingMember.uid,
-            reason: existingMember.banReason || 'একাধিক অ্যাকাউন্ট তৈরি বা সিকিউরিটি পলিসি লঙ্ঘনের কারণে এই একাউন্ট স্থগিত',
-          });
-          return;
-        }
-
-        // STRICT PASSWORD VERIFICATION
-        if (existingMember.password) {
-          if (existingMember.password !== password.trim()) {
-            setIsSubmitting(false);
-            sound.playLose();
-            setError('❌ ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড প্রদান করুন।');
-            return;
-          }
-        } else {
-          // If legacy sample member didn't have password, set it now
-          updateLocalMember(existingMember.uid, { password: password.trim() });
-        }
-
+      if (isAdmin) {
         sound.playWin();
         onLoginSuccess({
-          id: existingMember.uid,
-          phone: existingMember.phone,
-          countryCode: existingMember.countryCode || countryCode,
-          username: existingMember.username,
-          balance: existingMember.balance || 0.00,
-          role: 'user',
+          id: 'VW_SUPER_ADMIN',
+          phone: '01700000000',
+          countryCode: '+880',
+          username: 'Master_Admin',
+          balance: 99999.0,
+          vipLevel: 10,
+          role: 'admin',
           isLoggedIn: true,
-          invitationCode: existingMember.invitationCode || 'VICTOR888',
+          invitationCode: 'VICTOR888',
         });
         setIsSubmitting(false);
         onClose();
-      }, 500);
+        return;
+      }
+
+      // Check login via Firebase
+      const loginRes = await firebaseLoginMember(fullPhone, password);
+      setIsSubmitting(false);
+
+      if (!loginRes.success) {
+        sound.playLose();
+        if (loginRes.banned) {
+          setBannedUserPrompt({
+            uid: loginRes.user?.uid || 'USER',
+            reason: loginRes.banReason || 'সিকিউরিটি পলিসি লঙ্ঘনের কারণে এই একাউন্ট স্থগিত',
+          });
+        } else {
+          setError(loginRes.message || 'লগইন ব্যর্থ হয়েছে');
+        }
+        return;
+      }
+
+      const existingMember = loginRes.user!;
+      const userAvatar = existingMember.avatar || getAvatarForUser(existingMember.uid, existingMember.gender);
+      sound.playWin();
+      onLoginSuccess({
+        id: existingMember.uid,
+        phone: existingMember.phone,
+        countryCode: existingMember.countryCode || countryCode,
+        username: existingMember.username,
+        avatar: userAvatar,
+        balance: existingMember.balance || 0.0,
+        vipLevel: existingMember.vipLevel || 1,
+        role: 'user',
+        isLoggedIn: true,
+        invitationCode: existingMember.invitationCode || 'VICTOR888',
+      });
+      onClose();
       return;
     }
 
-    // If OTP flow or Register
+    // If Register
     if (mode === 'register') {
       if (!password || password.length < 4) {
         setError('পাসওয়ার্ড কমপক্ষে ৪ অক্ষরের হতে হবে (Password min 4 chars)');
         return;
       }
       setIsSubmitting(true);
-      setTimeout(() => {
-        const fullPhone = `${countryCode}${phone}`;
-        const members = getLocalMembers();
-        const existingMember = members.find((m) => m.phone === fullPhone || m.phone.endsWith(phone.replace(/\D/g, '').slice(-10)));
-        if (existingMember) {
-          setIsSubmitting(false);
-          sound.playLose();
-          if (existingMember.status === 'banned') {
-            setBannedUserPrompt({
-              uid: existingMember.uid,
-              reason: existingMember.banReason || 'নিরাপত্তা বিধি লঙ্ঘনের কারণে এই একাউন্ট স্থগিত',
-            });
-          } else {
-            setError('এই মোবাইল নম্বরটি দিয়ে ইতোমধ্যে একটি অ্যাকাউন্ট খোলা হয়েছে! অনুগ্রহ করে লগ ইন করুন।');
-          }
-          return;
-        }
+      const fullPhone = `${countryCode}${phone}`;
+      const rawDigits = phone.replace(/\D/g, '');
+      const memberNum = rawDigits.slice(-4) || '7777';
+      const userUid = `VW${rawDigits.slice(-6) || Math.floor(100000 + Math.random() * 900000)}`;
+      const username = `Player_${memberNum}`;
+      const balance = 0.0;
+      const device = getClientDeviceDetails();
+      const generatedAvatar = getAvatarForUser(userUid);
 
-        sound.playWin();
-        const rawDigits = phone.replace(/\D/g, '');
-        const memberNum = rawDigits.slice(-4) || '7777';
-        const userUid = `VW${rawDigits.slice(-6) || Math.floor(100000 + Math.random() * 900000)}`;
-        const username = `Player_${memberNum}`;
-        const balance = 0.00;
-        const device = getClientDeviceDetails();
+      const newMember: RegisteredMember = {
+        uid: userUid,
+        username,
+        avatar: generatedAvatar,
+        phone: fullPhone,
+        password: password.trim(),
+        countryCode,
+        balance,
+        vipLevel: 1,
+        invitationCode: invitationCode || 'VICTOR888',
+        gender: 'all',
+        registeredAt: new Date().toISOString().split('T')[0],
+        status: 'active',
+        lastActive: 'Just now',
+        totalDeposit: 0,
+        deviceIp: device.ip,
+        deviceModel: device.deviceModel,
+        browser: device.browser,
+        os: device.os,
+        network: device.network,
+      };
 
-        // Register member to system with password and device details
-        saveLocalMember({
-          uid: userUid,
-          username,
+      // Direct Firebase Registration (Fails if Firebase is not connected or permission denied)
+      const regRes = await firebaseRegisterMember(newMember);
+      setIsSubmitting(false);
+
+      if (!regRes.success) {
+        sound.playLose();
+        setError(regRes.message || '❌ ফায়ারবেসে একাউন্ট তৈরি ব্যর্থ হয়েছে!');
+        return;
+      }
+
+      sound.playWin();
+      onLoginSuccess(
+        {
+          id: userUid,
           phone: fullPhone,
-          password: password.trim(),
           countryCode,
+          username,
+          avatar: generatedAvatar,
           balance,
           vipLevel: 1,
+          role: 'user',
+          isLoggedIn: true,
           invitationCode: invitationCode || 'VICTOR888',
-          gender: 'all',
-          registeredAt: new Date().toISOString().split('T')[0],
-          status: 'active',
-          lastActive: 'Just now',
-          totalDeposit: 0,
-          deviceIp: device.ip,
-          deviceModel: device.deviceModel,
-          browser: device.browser,
-          os: device.os,
-          network: device.network,
-        });
-
-        onLoginSuccess(
-          {
-            id: userUid,
-            phone: fullPhone,
-            countryCode,
-            username,
-            balance,
-            role: 'user',
-            isLoggedIn: true,
-            invitationCode: invitationCode || 'VICTOR888',
-          },
-          true
-        );
-        setIsSubmitting(false);
-        onClose();
-      }, 500);
+        },
+        true
+      );
+      onClose();
       return;
     }
 
@@ -619,6 +600,44 @@ export function AuthModal({ initialMode, onClose, onLoginSuccess }: AuthModalPro
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+
+              {/* Live Firebase Cloud Connection Status Indicator */}
+              <div className="pt-1">
+                {firebaseStatus === 'connected' ? (
+                  <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-[11px] text-emerald-400">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="font-semibold">ফায়ারবেস ক্লাউড কানেক্টেড (victor-win)</span>
+                    </div>
+                    <Database className="w-3.5 h-3.5 text-emerald-400 opacity-80" />
+                  </div>
+                ) : firebaseStatus === 'error' ? (
+                  <div className="p-2.5 rounded-xl bg-red-950/50 border border-red-500/40 space-y-1.5 text-left">
+                    <div className="flex items-center justify-between text-xs font-bold text-red-400">
+                      <div className="flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                        <span>ফায়ারবেস কানেকশন লকড / ফেইল্ড</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={verifyFirebase}
+                        className="px-2 py-0.5 rounded bg-red-800/60 hover:bg-red-700 text-white text-[10px] flex items-center gap-1 cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>রিট্রাই</span>
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-red-300 leading-tight">
+                      {firebaseErrorMessage}। ফায়ারবেস কনসোলে গিয়ে <b>Firestore Database → Rules</b> এ <code className="bg-black/40 px-1 py-0.5 rounded text-amber-300">allow read, write: if true;</code> দিয়ে <b>Publish</b> করুন।
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 py-1 text-[11px] text-slate-400">
+                    <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+                    <span>ফায়ারবেস ক্লাউড চেক হচ্ছে...</span>
+                  </div>
+                )}
+              </div>
             </form>
           ) : (
             <div className="space-y-4 pt-2">

@@ -1300,10 +1300,12 @@ export const RECENT_WINNERS = [
 ];
 
 export const VIP_TIERS = [
-  { level: 1, name: 'Bronze VIP', expReq: 0, rebate: '0.4%', monthlySalary: 500, gift: 100 },
-  { level: 2, name: 'Silver VIP', expReq: 2000, rebate: '0.6%', monthlySalary: 1500, gift: 300 },
-  { level: 3, name: 'Gold VIP', expReq: 5000, rebate: '0.8%', monthlySalary: 3500, gift: 800 },
-  { level: 4, name: 'Platinum VIP', expReq: 15000, rebate: '1.0%', monthlySalary: 8000, gift: 2000 },
-  { level: 5, name: 'Diamond VIP', expReq: 50000, rebate: '1.2%', monthlySalary: 25000, gift: 6000 },
-  { level: 6, name: 'Crown VIP', expReq: 150000, rebate: '1.5%', monthlySalary: 75000, gift: 20000 },
+  { level: 1, name: 'Bronze VIP 1', minDeposit: 100, tradesReq: 1000, expReq: 1000, rebate: '0.40%', monthlySalary: 500, gift: 100 },
+  { level: 2, name: 'Silver VIP 2', minDeposit: 500, tradesReq: 3000, expReq: 3000, rebate: '0.60%', monthlySalary: 1500, gift: 300 },
+  { level: 3, name: 'Gold VIP 3', minDeposit: 2000, tradesReq: 8000, expReq: 8000, rebate: '0.80%', monthlySalary: 4000, gift: 800 },
+  { level: 4, name: 'Platinum VIP 4', minDeposit: 5000, tradesReq: 20000, expReq: 20000, rebate: '1.00%', monthlySalary: 10000, gift: 2000 },
+  { level: 5, name: 'Diamond VIP 5', minDeposit: 15000, tradesReq: 50000, expReq: 50000, rebate: '1.20%', monthlySalary: 25000, gift: 6000 },
+  { level: 6, name: 'Crown VIP 6', minDeposit: 50000, tradesReq: 120000, expReq: 120000, rebate: '1.50%', monthlySalary: 60000, gift: 15000 },
+  { level: 7, name: 'King VIP 7', minDeposit: 120000, tradesReq: 300000, expReq: 300000, rebate: '1.80%', monthlySalary: 150000, gift: 40000 },
+  { level: 8, name: 'Supreme VIP 8', minDeposit: 300000, tradesReq: 800000, expReq: 800000, rebate: '2.20%', monthlySalary: 350000, gift: 100000 },
 ];

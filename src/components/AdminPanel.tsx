@@ -42,6 +42,8 @@ import {
   AlertTriangle,
   FileText,
   X,
+  Menu,
+  Download,
 } from 'lucide-react';
 import {
   SystemConfig,
@@ -54,6 +56,7 @@ import {
   getLocalDepositRequests,
   updateDepositRequestStatus,
   subscribeSystemConfig,
+  subscribeMembers,
   getLocalMembers,
   saveLocalMember,
   updateLocalMember,
@@ -79,6 +82,9 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
   const [activeNav, setActiveNav] = useState<
     'dashboard' | 'users' | 'devices' | 'giftcodes' | 'market' | 'livebets' | 'deposits' | 'gateways' | 'games' | 'commissions' | 'system'
   >('dashboard');
+
+  // Mobile/responsive sidebar drawer state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Live Firebase Synchronized System Config
   const [config, setConfig] = useState<SystemConfig>(() => getLocalConfig());
@@ -130,11 +136,16 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
       setConfig(newCfg);
     });
 
+    const unsubMembers = subscribeMembers((remoteMembers) => {
+      if (remoteMembers && remoteMembers.length > 0) {
+        setMembers(remoteMembers);
+      }
+    });
+
     const clockInterval = setInterval(() => {
       setLiveWinGo(getRealtimeWinGo(30));
       setLiveAviator(getRealtimeAviator());
       setDepositRequests(getLocalDepositRequests());
-      setMembers(getLocalMembers());
       setLiveBets(getStoredLiveBets());
       setCurrentTime(new Date().toLocaleTimeString());
     }, 1000);
@@ -146,6 +157,7 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
 
     return () => {
       unsub();
+      unsubMembers();
       clearInterval(clockInterval);
       window.removeEventListener('victorwin_live_bet_placed', handleBetPlaced);
     };
@@ -330,6 +342,9 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
   const totalApprovedDepositAmount = depositRequests
     .filter((d) => d.status === 'approved')
     .reduce((sum, d) => sum + (d.amount || 0), 0);
+  const totalMemberDeposited = members.reduce((sum, m) => sum + (m.totalDeposit || 0), 0);
+  const totalReferralRegistrations = members.reduce((sum, m) => sum + (m.referralCount || 0), 0);
+  const totalReferralDepositors = members.reduce((sum, m) => sum + (m.referralDepositsCount || 0), 0);
 
   interface NavItem {
     id: 'dashboard' | 'users' | 'devices' | 'giftcodes' | 'market' | 'livebets' | 'deposits' | 'gateways' | 'games' | 'commissions' | 'system';
@@ -374,6 +389,19 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
       {/* ================= TOP MASTER HUB HEADER ================= */}
       <header className="sticky top-0 z-40 w-full bg-[#07132e]/98 backdrop-blur-md border-b border-blue-500/30 px-3 sm:px-6 py-2.5 flex items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-3">
+          {/* Mobile Three-Line (Hamburger) Menu Button */}
+          <button
+            type="button"
+            onClick={() => {
+              sound.playClick();
+              setIsSidebarOpen(!isSidebarOpen);
+            }}
+            className="md:hidden p-2 rounded-xl bg-[#0a1738] border border-blue-500/40 text-amber-400 hover:text-white transition-all cursor-pointer"
+            title="মেনু খুলুন"
+          >
+            {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+
           <BrandLogo size="md" />
           <div className="hidden sm:block border-l border-blue-500/30 pl-3">
             <div className="flex items-center gap-2">
@@ -441,12 +469,35 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
       </header>
 
       {/* ================= MAIN LAYOUT WITH SIDEBAR + WORKSPACE ================= */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         
-        {/* Left Navigation Sidebar */}
-        <aside className="w-full md:w-64 lg:w-72 bg-[#060e22] border-r border-blue-900/60 flex flex-row md:flex-col shrink-0 overflow-x-auto md:overflow-y-auto p-2 sm:p-3 gap-1.5 scrollbar-none">
-          <div className="hidden md:block px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            মাস্টার কন্ট্রোল মেনু
+        {/* Mobile Backdrop Overlay */}
+        {isSidebarOpen && (
+          <div
+            onClick={() => setIsSidebarOpen(false)}
+            className="md:hidden fixed inset-0 z-30 bg-black/60 backdrop-blur-sm"
+          />
+        )}
+
+        {/* Navigation Sidebar (Desktop persistent + Mobile slide-over drawer) */}
+        <aside
+          className={`
+            fixed md:static top-14 bottom-0 left-0 z-40 md:z-auto
+            w-72 bg-[#060e22] border-r border-blue-900/60
+            flex flex-col shrink-0 overflow-y-auto p-3 gap-1.5 shadow-2xl md:shadow-none
+            transition-transform duration-300 ease-in-out
+            ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+          `}
+        >
+          <div className="flex items-center justify-between px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span>মাস্টার কন্ট্রোল মেনু</span>
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(false)}
+              className="md:hidden p-1 rounded-lg text-slate-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
           {navItems.map((item) => {
@@ -459,8 +510,9 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
                 onClick={() => {
                   sound.playClick();
                   setActiveNav(item.id);
+                  setIsSidebarOpen(false);
                 }}
-                className={`w-auto md:w-full flex items-center justify-between px-3 py-2.5 rounded-2xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-2xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                   isActive
                     ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black shadow-lg shadow-amber-950/40'
                     : 'text-slate-300 hover:text-white hover:bg-[#0a1738]'
@@ -488,7 +540,7 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
             );
           })}
 
-          <div className="hidden md:block mt-auto pt-4 border-t border-blue-900/40 px-3 text-[11px] text-slate-400 space-y-1">
+          <div className="mt-auto pt-4 border-t border-blue-900/40 px-3 text-[11px] text-slate-400 space-y-1">
             <div className="flex items-center justify-between">
               <span>সার্ভার সময়:</span>
               <span className="font-mono text-amber-300 font-bold">{currentTime}</span>
@@ -557,6 +609,51 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
                   </div>
                   <div className="text-[11px] text-slate-400">
                     সকল ইউজার / নির্দিষ্ট UID / মেয়েদের জন্য
+                  </div>
+                </div>
+              </div>
+
+              {/* Extended Summary Statistics Row: Total Platform Deposits & Referral Network */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-4 rounded-3xl bg-[#071330] border border-emerald-500/40 shadow-lg space-y-1.5">
+                  <div className="flex items-center justify-between text-xs text-slate-300 font-bold">
+                    <span>মোট সংগৃহীত ডিপোজিট (Life-time)</span>
+                    <DollarSign className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div className="text-2xl font-black font-mono text-emerald-300">
+                    ৳{totalMemberDeposited.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[11px] text-slate-400 flex items-center justify-between">
+                    <span>অনুমোদিত ডিপোজিট ট্রানজেকশন:</span>
+                    <span className="font-mono text-emerald-400 font-bold">
+                      ৳{totalApprovedDepositAmount.toLocaleString('en-US')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-3xl bg-[#071330] border border-sky-500/40 shadow-lg space-y-1.5">
+                  <div className="flex items-center justify-between text-xs text-slate-300 font-bold">
+                    <span>রেফারেল নেটওয়ার্ক রেজিস্ট্রেশন</span>
+                    <Share2 className="w-4 h-4 text-sky-400" />
+                  </div>
+                  <div className="text-2xl font-black font-mono text-sky-300">
+                    {totalReferralRegistrations} জন
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    ইনভাইট কোডের মাধ্যমে মেম্বারদের সাইন আপ
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-3xl bg-[#071330] border border-amber-500/40 shadow-lg space-y-1.5">
+                  <div className="flex items-center justify-between text-xs text-slate-300 font-bold">
+                    <span>রেফারেল ডিপোজিটর সদস্য</span>
+                    <UserCheck className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <div className="text-2xl font-black font-mono text-amber-300">
+                    {totalReferralDepositors} জন
+                  </div>
+                  <div className="text-[11px] text-emerald-400 font-bold">
+                    রেফারেল থেকে সক্রিয় রিচার্জকারী সদস্য
                   </div>
                 </div>
               </div>
@@ -832,7 +929,8 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
                       <tr>
                         <th className="p-3.5">ইউজার প্রোফাইল ও UID</th>
                         <th className="p-3.5">ইউজারনেম ও ফোন নম্বর</th>
-                        <th className="p-3.5">ডিভাইস মডেল ও IP অ্যাড্রেস</th>
+                        <th className="p-3.5">ডিভাইস মডেল ও IP</th>
+                        <th className="p-3.5">রেফারেল ট্র্যাকিং (রেজিঃ/ডিপোজিট)</th>
                         <th className="p-3.5">ভিআইপি</th>
                         <th className="p-3.5">বর্তমান ব্যালেন্স</th>
                         <th className="p-3.5">স্ট্যাটাস / ব্যান রিমাইন্ডার</th>
@@ -914,6 +1012,32 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
                                 <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 rounded border border-amber-500/40" title="একই IP তে একাধিক একাউন্ট">
                                   ডুপ্লিকেট IP
                                 </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Referral Tracking: Invitation Code, Referred By, Signups & Deposit count */}
+                          <td className="p-3.5">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-slate-400">কোড:</span>
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold text-[10px] border border-amber-500/30">
+                                  {member.invitationCode || 'VICTOR888'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px]">
+                                <span className="text-sky-300 font-bold font-mono">
+                                  {member.referralCount || 0} জন রেজিঃ
+                                </span>
+                                <span className="text-slate-500">•</span>
+                                <span className="text-emerald-400 font-bold font-mono">
+                                  {member.referralDepositsCount || 0} জন ডিপোজিট
+                                </span>
+                              </div>
+                              {member.referredBy && (
+                                <div className="text-[9px] text-slate-400">
+                                  ভায়া: <span className="text-amber-200 font-mono">{member.referredBy}</span>
+                                </div>
                               )}
                             </div>
                           </td>
@@ -2456,6 +2580,38 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
                     }}
                     className="w-full bg-[#040918] border border-blue-500/40 rounded-xl px-3 py-2 text-xs font-medium text-white focus:outline-none"
                   />
+                </div>
+              </div>
+
+              {/* Dynamic Game APK / App Download Link Management */}
+              <div className="p-5 rounded-3xl bg-[#060e22] border border-blue-500/30 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Download className="w-5 h-5 text-sky-400" />
+                    <div>
+                      <h4 className="text-sm font-black text-white">অ্যাপ ও গেম ডাউনলোড লিঙ্ক কনফিগারেশন (APK Download URL)</h4>
+                      <p className="text-xs text-slate-400">এখান থেকে নতুন অ্যাপ ডাউনলোড লিঙ্ক সেট করলে ব্যবহারকারীদের অ্যাপে সাথে সাথে পরিবর্তন হবে</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="https://example.com/download/victorwin.apk"
+                    value={config.appDownloadUrl || ''}
+                    onChange={(e) => handleSaveConfig({ appDownloadUrl: e.target.value })}
+                    className="flex-1 w-full bg-[#040918] border border-blue-500/40 rounded-xl px-3 py-2 text-xs font-mono font-medium text-sky-300 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      showToast('অ্যাপ ডাউনলোড লিঙ্ক সফলভাবে সেভ ও লাইভ আপডেট হয়েছে!');
+                    }}
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-black shadow cursor-pointer transition-all shrink-0"
+                  >
+                    লিঙ্ক আপডেট করুন
+                  </button>
                 </div>
               </div>
 

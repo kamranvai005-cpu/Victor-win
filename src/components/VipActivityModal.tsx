@@ -145,26 +145,55 @@ export function VipActivityModal({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-400 border border-amber-300 flex items-center justify-center p-1 text-slate-950 font-black text-sm">
-                    VIP{user.vipLevel}
+                    VIP{user.vipLevel || 1}
                   </div>
                   <div>
-                    <h3 className="font-bold text-white text-sm">গোল্ড VIP মেম্বার (Level {user.vipLevel})</h3>
+                    <h3 className="font-bold text-white text-sm">
+                      {VIP_TIERS.find((t) => t.level === user.vipLevel)?.name || `VIP ${user.vipLevel || 1} মেম্বার`}
+                    </h3>
                     <p className="text-xs text-amber-300/90 flex items-center gap-1">
-                      মাসিক বেতন: <span className="font-mono font-bold">{getSymbol(currency)}3,500</span>
+                      মাসিক নিশ্চিত বেতন: <span className="font-mono font-bold text-emerald-400">{getSymbol(currency)}{(VIP_TIERS.find((t) => t.level === user.vipLevel)?.monthlySalary || 500).toLocaleString('en-US')}</span>
                     </p>
                   </div>
                 </div>
-                <span className="text-xs font-mono font-bold text-amber-300 bg-amber-950/60 px-2.5 py-1 rounded-xl border border-amber-500/40">
-                  {user.vipExp} / {user.nextVipExp} EXP
-                </span>
+                <div className="text-right">
+                  <span className="text-xs font-mono font-bold text-amber-300 bg-amber-950/60 px-2.5 py-1 rounded-xl border border-amber-500/40 block">
+                    {user.vipExp || 0} / {user.nextVipExp || 1000} EXP
+                  </span>
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">বৈধ ট্রেড: {user.vipExp || 0} বার</span>
+                </div>
               </div>
 
-              {/* Progress Bar */}
-              <div className="w-full h-2.5 rounded-full bg-blue-950 overflow-hidden border border-blue-900">
-                <div
-                  style={{ width: `${(user.vipExp / user.nextVipExp) * 100}%` }}
-                  className="h-full bg-gradient-to-r from-amber-500 to-yellow-300 rounded-full"
-                />
+              {/* VIP 1 Entry Requirement Milestone Card */}
+              <div className="p-3 rounded-xl bg-black/40 border border-amber-500/30 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-amber-300">
+                  <span>VIP 1 এন্ট্রি অগ্রগতি (১০০ টাকা ডিপোজিট + ১০০০ বার ট্রেড)</span>
+                  <span className="text-[10px] text-emerald-400 font-mono">
+                    {user.balance >= 100 ? 'ডিপোজিট সম্পন্ন ✓' : 'ডিপোজিট বাকি'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2 rounded-lg bg-blue-950/50 border border-blue-500/20">
+                    <span className="text-slate-400 block text-[10px]">১. রিচার্জ / ডিপোজিট:</span>
+                    <span className="font-mono font-bold text-white">
+                      ৳{user.balance.toFixed(0)} / ৳100
+                    </span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-blue-950/50 border border-blue-500/20">
+                    <span className="text-slate-400 block text-[10px]">২. বৈধ ট্রেড / বেট সংখ্যা:</span>
+                    <span className="font-mono font-bold text-white">
+                      {user.vipExp || 0} / 1,000 বার
+                    </span>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="w-full h-2 rounded-full bg-blue-950 overflow-hidden border border-blue-900">
+                  <div
+                    style={{ width: `${Math.min(100, ((user.vipExp || 0) / 1000) * 100)}%` }}
+                    className="h-full bg-gradient-to-r from-amber-500 via-yellow-400 to-emerald-400 rounded-full transition-all duration-500"
+                  />
+                </div>
               </div>
             </div>
 
@@ -178,7 +207,7 @@ export function VipActivityModal({
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                   new Date().getDate() === 1
                     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
-                    : 'bg-rose-500/20 text-rose-300 border border-rose-400/40'
+                    : 'bg-amber-500/20 text-amber-300 border border-amber-400/40'
                 }`}>
                   {new Date().getDate() === 1 ? 'উইন্ডো উন্মুক্ত (আজ ১ তারিখ)' : `বন্ধ (আজ মাসের ${new Date().getDate()} তারিখ)`}
                 </span>
@@ -187,11 +216,11 @@ export function VipActivityModal({
               <p className="text-[11px] text-slate-300 leading-relaxed">
                 {new Date().getDate() === 1 ? (
                   <span className="text-emerald-300 font-medium">
-                    ✓ আজ মাসের ১ তারিখ! আপনার VIP{user.vipLevel} মাসিক বেতন {getSymbol(currency)}3,500 ক্লেইম করার উইন্ডো এখন সক্রিয়।
+                    ✓ আজ মাসের ১ তারিখ! আপনার VIP{user.vipLevel || 1} মাসিক বেতন {getSymbol(currency)}{(VIP_TIERS.find((t) => t.level === user.vipLevel)?.monthlySalary || 500).toLocaleString('en-US')} ক্লেইম করার উইন্ডো এখন সক্রিয়।
                   </span>
                 ) : (
                   <span className="text-amber-200/90 font-medium">
-                    ⚠️ নিয়মাবলী: ভিআইপি স্ট্যাটাস আপগ্রেড এবং মাসিক বেতন শুধুমাত্র প্রতি মাসের ১ তারিখে গ্রহণ করা যাবে। পরবর্তী উইন্ডো আগামী মাসের ১ তারিখ।
+                    📌 নিয়মাবলী: ভিআইপি মাসিক বেতন প্রতি মাসের ১ তারিখে ক্লেইম করা যায়। আপনার বর্তমান VIP{user.vipLevel || 1} অনুযায়ী নির্ধারিত মাসিক বেতন {getSymbol(currency)}{(VIP_TIERS.find((t) => t.level === user.vipLevel)?.monthlySalary || 500).toLocaleString('en-US')} টাকা।
                   </span>
                 )}
               </p>
@@ -201,9 +230,10 @@ export function VipActivityModal({
                 disabled={new Date().getDate() !== 1}
                 onClick={() => {
                   if (new Date().getDate() === 1) {
+                    const sal = VIP_TIERS.find((t) => t.level === user.vipLevel)?.monthlySalary || 500;
                     sound.playWin();
                     confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-                    onUpdateBalance(user.balance + 3500);
+                    onUpdateBalance(user.balance + sal);
                   }
                 }}
                 className={`w-full py-2.5 rounded-xl text-xs font-black transition-all shadow-md ${
@@ -212,36 +242,48 @@ export function VipActivityModal({
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
                 }`}
               >
-                {new Date().getDate() === 1 ? `মাসিক বেতন ক্লেইম করুন (${getSymbol(currency)}3,500)` : '🔒 প্রতি মাসের ১ তারিখে সক্রিয় হবে'}
+                {new Date().getDate() === 1 ? `মাসিক বেতন ক্লেইম করুন (${getSymbol(currency)}${(VIP_TIERS.find((t) => t.level === user.vipLevel)?.monthlySalary || 500).toLocaleString('en-US')})` : `🔒 প্রতি মাসের ১ তারিখে বেতন ছাড় হবে (${getSymbol(currency)}${(VIP_TIERS.find((t) => t.level === user.vipLevel)?.monthlySalary || 500).toLocaleString('en-US')})`}
               </button>
             </div>
 
             {/* VIP Tiers Table */}
             <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300">VIP লেভেল প্রিভিলেজ চার্ট</span>
+              <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                <span>VIP লেভেল যোগ্যতা ও সুবিধা চার্ট</span>
+                <span className="text-[10px] text-amber-400 font-normal">১০০ টাকা + ১০০০ বেট = VIP 1</span>
+              </div>
               <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
                 {VIP_TIERS.map((tier) => (
                   <div
                     key={tier.level}
-                    className={`p-3 rounded-2xl border flex items-center justify-between text-xs transition-all ${
+                    className={`p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs transition-all ${
                       tier.level === user.vipLevel
                         ? 'bg-amber-500/15 border-amber-400 text-amber-200 shadow-md'
                         : 'bg-[#060e22] border-blue-500/20 text-slate-300'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 font-mono font-black text-xs">
+                      <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 font-mono font-black text-xs shrink-0">
                         V{tier.level}
                       </div>
                       <div>
-                        <span className="font-black font-mono text-amber-400 block">VIP {tier.level}</span>
-                        <span className="text-[10px] text-slate-400">{tier.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-black font-mono text-amber-400">{tier.name}</span>
+                          {tier.level === user.vipLevel && (
+                            <span className="px-1.5 py-0.2 text-[9px] bg-emerald-500/30 text-emerald-300 rounded-md font-bold">
+                              বর্তমান
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400">
+                          শর্ত: ৳{tier.minDeposit} ডিপোজিট • {tier.tradesReq.toLocaleString('en-US')} বার ট্রেড
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 font-mono">
-                      <span>রিবেট: {tier.rebate}</span>
-                      <span className="text-emerald-400 font-bold">
-                        বেতন: {getSymbol(currency)}{tier.monthlySalary}
+                    <div className="flex items-center gap-2 sm:gap-3 font-mono text-[11px] self-end sm:self-auto">
+                      <span className="text-slate-400">রিবেট: {tier.rebate}</span>
+                      <span className="text-emerald-400 font-bold bg-emerald-950/40 px-2 py-0.5 rounded-lg border border-emerald-500/30">
+                        বেতন: {getSymbol(currency)}{tier.monthlySalary.toLocaleString('en-US')}
                       </span>
                     </div>
                   </div>
