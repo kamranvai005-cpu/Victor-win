@@ -46,9 +46,8 @@ export function PromotionView({
 
   // Real data with dynamic host URL for referral
   const inviteCode = user.invitationCode || 'VICTOR888';
-  const inviteLink = typeof window !== 'undefined'
-    ? `${window.location.origin}?ref=${inviteCode}`
-    : `https://victorwin.bet?ref=${inviteCode}`;
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://victorwin.bet';
+  const inviteLink = `${baseUrl}/#/register?invitationCode=${inviteCode}`;
 
   // Start with clean authentic metrics (no fake demo claims)
   const [accumulatedCommission, setAccumulatedCommission] = useState<number>(0.00);

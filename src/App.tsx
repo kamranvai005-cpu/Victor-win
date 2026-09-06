@@ -130,18 +130,34 @@ export default function App() {
   const footerClickCount = useRef<number>(0);
   const footerClickTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto-detect referral code from URL query parameter
+  // Auto-detect referral code and register route from URL (query or hash)
   useEffect(() => {
     try {
+      let refCode: string | null = null;
       const searchParams = new URLSearchParams(window.location.search);
-      const refParam = searchParams.get('ref') || searchParams.get('invite') || searchParams.get('r') || searchParams.get('code');
-      if (refParam) {
-        localStorage.setItem('victor_referral_code', refParam.toUpperCase());
+      refCode = searchParams.get('invitationCode') || searchParams.get('ref') || searchParams.get('invite') || searchParams.get('code') || searchParams.get('r');
+
+      // Also check hash query, e.g. /#/register?invitationCode=VICTOR888
+      if (!refCode && window.location.hash.includes('?')) {
+        const hashQueryPart = window.location.hash.split('?')[1];
+        if (hashQueryPart) {
+          const hashParams = new URLSearchParams(hashQueryPart);
+          refCode = hashParams.get('invitationCode') || hashParams.get('ref') || hashParams.get('invite') || hashParams.get('code') || hashParams.get('r');
+        }
+      }
+
+      if (refCode) {
+        localStorage.setItem('victor_referral_code', refCode.toUpperCase());
+      }
+
+      // If URL has #/register and user is not logged in, trigger register modal automatically
+      if (window.location.hash.includes('/register') && !user.isLoggedIn) {
+        setShowAuth({ open: true, mode: 'register' });
       }
     } catch {
       // Ignored
     }
-  }, []);
+  }, [user.isLoggedIn]);
 
   // Check ban status on active user
   useEffect(() => {

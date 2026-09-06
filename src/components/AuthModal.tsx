@@ -68,15 +68,31 @@ export function AuthModal({ initialMode, onClose, onLoginSuccess }: AuthModalPro
     verifyFirebase();
   }, []);
 
-  // Auto-detect referral code from URL search query (?ref=..., ?invite=..., ?code=...)
+  // Auto-detect referral code from URL search query (?ref=..., ?invitationCode=...) or hash (/#/register?invitationCode=...)
   useEffect(() => {
     try {
+      let refParam: string | null = null;
       const searchParams = new URLSearchParams(window.location.search);
-      const refParam =
+      refParam =
+        searchParams.get('invitationCode') ||
         searchParams.get('ref') ||
         searchParams.get('invite') ||
         searchParams.get('r') ||
         searchParams.get('code');
+
+      if (!refParam && window.location.hash.includes('?')) {
+        const hashQueryPart = window.location.hash.split('?')[1];
+        if (hashQueryPart) {
+          const hashParams = new URLSearchParams(hashQueryPart);
+          refParam =
+            hashParams.get('invitationCode') ||
+            hashParams.get('ref') ||
+            hashParams.get('invite') ||
+            hashParams.get('r') ||
+            hashParams.get('code');
+        }
+      }
+
       if (refParam) {
         setInvitationCode(refParam.toUpperCase());
         localStorage.setItem('victor_referral_code', refParam.toUpperCase());

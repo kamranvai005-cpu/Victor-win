@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   Flame,
@@ -6,12 +6,12 @@ import {
   TrendingUp,
   ArrowLeft,
   Wallet,
-  Volume2,
-  Plane,
+  Clock,
+  Users,
   X,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { AviatorBet, Currency } from '../types';
+import { Currency } from '../types';
 import { sound } from '../utils/audio';
 import { getRealtimeAviator } from '../utils/gameSync';
 
@@ -21,6 +21,93 @@ interface AviatorGameProps {
   currency: Currency;
   onOpenDeposit: () => void;
   onBackToLobby?: () => void;
+}
+
+interface SimulatedPlayerBet {
+  id: string;
+  user: string;
+  avatar: string;
+  betAmount: number;
+  targetCashOut: number;
+  cashedOutMultiplier?: number;
+  payout?: number;
+  status: 'in_flight' | 'cashed_out' | 'crashed';
+}
+
+const PLAYER_POOL = [
+  { name: 'Shakib***8', avatar: '😎' },
+  { name: 'Rony***2', avatar: '🚀' },
+  { name: 'Tanvir***7', avatar: '🔥' },
+  { name: 'Mizan***4', avatar: '💎' },
+  { name: 'Kamran***9', avatar: '⚡' },
+  { name: 'Akash***1', avatar: '🎯' },
+  { name: 'Sumon***5', avatar: '👑' },
+  { name: 'Rakib***3', avatar: '🌟' },
+  { name: 'Tareq***6', avatar: '💸' },
+  { name: 'Hasan***0', avatar: '🏆' },
+  { name: 'Shakil***8', avatar: '🦁' },
+  { name: 'Sohel***2', avatar: '🐯' },
+  { name: 'Mehedi***7', avatar: '🦅' },
+  { name: 'Rubel***4', avatar: '💰' },
+  { name: 'Kamal***9', avatar: '🎲' },
+  { name: 'Fahim***1', avatar: '🔥' },
+  { name: 'Arif***5', avatar: '🚀' },
+  { name: 'Saiful***3', avatar: '💎' },
+  { name: 'Noman***6', avatar: '⚡' },
+  { name: 'AlAmin***0', avatar: '😎' },
+  { name: 'Mithun***8', avatar: '🎯' },
+  { name: 'Jewel***2', avatar: '👑' },
+  { name: 'Imran***7', avatar: '🌟' },
+  { name: 'Parvez***4', avatar: '💸' },
+  { name: 'Babu***9', avatar: '🏆' },
+  { name: 'Shanto***1', avatar: '🦁' },
+  { name: 'Tanmoy***5', avatar: '🐯' },
+  { name: 'Monir***3', avatar: '🦅' },
+  { name: 'Rezaul***6', avatar: '💰' },
+  { name: 'Sabbir***0', avatar: '🎲' },
+  { name: 'Salman***8', avatar: '🔥' },
+  { name: 'Masud***2', avatar: '🚀' },
+  { name: 'Jahid***7', avatar: '💎' },
+  { name: 'Faysal***4', avatar: '⚡' },
+  { name: 'Asif***9', avatar: '😎' },
+  { name: 'Biplob***5', avatar: '🎯' },
+  { name: 'Ripon***3', avatar: '👑' },
+  { name: 'Nahid***6', avatar: '🌟' },
+  { name: 'Kawsar***0', avatar: '💸' },
+  { name: 'Rasel***5', avatar: '🏆' },
+];
+
+const BET_AMOUNTS = [50, 100, 150, 200, 300, 500, 800, 1000, 1500, 2000, 2500, 3000, 5000];
+
+function generateRoundBets(cycleIndex: number): SimulatedPlayerBet[] {
+  // Generate 24 to 34 players each round with dynamic names & target multipliers
+  const count = 24 + ((cycleIndex * 7) % 11);
+  const shuffled = [...PLAYER_POOL].sort(() => 0.5 - Math.random()).slice(0, count);
+
+  return shuffled.map((p, idx) => {
+    const bet = BET_AMOUNTS[Math.floor(Math.random() * BET_AMOUNTS.length)];
+    // Weighted cashout targets
+    const rand = Math.random();
+    let target = 1.35;
+    if (rand < 0.40) {
+      target = +(1.15 + Math.random() * 0.65).toFixed(2);
+    } else if (rand < 0.75) {
+      target = +(1.80 + Math.random() * 1.20).toFixed(2);
+    } else if (rand < 0.90) {
+      target = +(3.00 + Math.random() * 3.00).toFixed(2);
+    } else {
+      target = +(6.00 + Math.random() * 10.00).toFixed(2);
+    }
+
+    return {
+      id: `round_${cycleIndex}_${idx}`,
+      user: p.name,
+      avatar: p.avatar,
+      betAmount: bet,
+      targetCashOut: target,
+      status: 'in_flight' as const,
+    };
+  });
 }
 
 export function AviatorGame({
@@ -41,17 +128,38 @@ export function AviatorGame({
   const [autoCashOut, setAutoCashOut] = useState<boolean>(false);
   const [autoCashOutMultiplier, setAutoCashOutMultiplier] = useState<number>(2.00);
 
+  // Queued bet for next round (Strict Rule: plane in flight = cannot bet in current round)
+  const [queuedForNextRound, setQueuedForNextRound] = useState<boolean>(false);
+  const [queuedBetAmount, setQueuedBetAmount] = useState<number>(100);
+
   // Win Celebration Screen
   const [winCelebration, setWinCelebration] = useState<{ amount: number; multiplier: number } | null>(null);
 
-  // Live players simulated feed
-  const [liveBets] = useState<AviatorBet[]>([
-    { id: '1', user: 'Shakib***', avatar: '😎', betAmount: 500, status: 'in_flight' },
-    { id: '2', user: 'Rony***', avatar: '🚀', betAmount: 1000, status: 'in_flight' },
-    { id: '3', user: 'Tanvir***', avatar: '🔥', betAmount: 250, status: 'in_flight' },
-    { id: '4', user: 'Mizan***', avatar: '💎', betAmount: 2000, status: 'in_flight' },
-    { id: '5', user: 'Kamran***', avatar: '⚡', betAmount: 800, status: 'in_flight' },
-  ]);
+  // Live players simulated feed & filter tab
+  const [liveBets, setLiveBets] = useState<SimulatedPlayerBet[]>(() =>
+    generateRoundBets(getRealtimeAviator().cycleIndex)
+  );
+  const [activeTab, setActiveTab] = useState<'all' | 'my' | 'winners'>('all');
+
+  // Refs for smooth tracking in interval
+  const liveBetsRef = useRef<SimulatedPlayerBet[]>(liveBets);
+  const lastCycleRef = useRef<number>(aviatorState.cycleIndex);
+  const queuedForNextRoundRef = useRef<boolean>(queuedForNextRound);
+  const queuedBetAmountRef = useRef<number>(queuedBetAmount);
+  const balanceRef = useRef<number>(userBalance);
+
+  useEffect(() => {
+    liveBetsRef.current = liveBets;
+  }, [liveBets]);
+
+  useEffect(() => {
+    queuedForNextRoundRef.current = queuedForNextRound;
+    queuedBetAmountRef.current = queuedBetAmount;
+  }, [queuedForNextRound, queuedBetAmount]);
+
+  useEffect(() => {
+    balanceRef.current = userBalance;
+  }, [userBalance]);
 
   const getSymbol = (c: Currency) => (c === 'BDT' ? '৳' : c === 'INR' ? '₹' : '$');
 
@@ -60,12 +168,69 @@ export function AviatorGame({
     const interval = setInterval(() => {
       const current = getRealtimeAviator();
 
+      // Check for round transition (new round starting)
+      if (current.cycleIndex !== lastCycleRef.current) {
+        lastCycleRef.current = current.cycleIndex;
+
+        // Generate fresh dynamic players list for the new round
+        const freshBets = generateRoundBets(current.cycleIndex);
+        liveBetsRef.current = freshBets;
+        setLiveBets(freshBets);
+
+        // Auto-activate queued bet if user booked during previous flight
+        if (queuedForNextRoundRef.current) {
+          const stake = queuedBetAmountRef.current;
+          if (balanceRef.current >= stake) {
+            sound.playChip();
+            onUpdateBalance(balanceRef.current - stake);
+            setBetCycleIndex(current.cycleIndex);
+            setHasCashedOut(false);
+            setCashedOutAt(null);
+          }
+          setQueuedForNextRound(false);
+        }
+      }
+
       // Check if crash just happened
       if (aviatorState.status === 'flying' && current.status === 'crashed') {
         sound.playCrash();
+        // Mark remaining un-cashed players as crashed
+        let changed = false;
+        const updated = liveBetsRef.current.map((p) => {
+          if (p.status === 'in_flight') {
+            changed = true;
+            return { ...p, status: 'crashed' as const };
+          }
+          return p;
+        });
+        if (changed) {
+          liveBetsRef.current = updated;
+          setLiveBets(updated);
+        }
       }
 
-      // Check auto cashout
+      // In flight: check automated cashouts for other live players
+      if (current.status === 'flying') {
+        let changed = false;
+        const updated = liveBetsRef.current.map((p) => {
+          if (p.status === 'in_flight' && current.currentMultiplier >= p.targetCashOut) {
+            changed = true;
+            return {
+              ...p,
+              status: 'cashed_out' as const,
+              cashedOutMultiplier: p.targetCashOut,
+              payout: +(p.betAmount * p.targetCashOut).toFixed(2),
+            };
+          }
+          return p;
+        });
+        if (changed) {
+          liveBetsRef.current = updated;
+          setLiveBets(updated);
+        }
+      }
+
+      // Check user's auto cashout
       if (
         betCycleIndex === current.cycleIndex &&
         !hasCashedOut &&
@@ -80,22 +245,50 @@ export function AviatorGame({
     }, 100);
 
     return () => clearInterval(interval);
-  }, [aviatorState, betCycleIndex, hasCashedOut, autoCashOut, autoCashOutMultiplier, userBalance]);
+  }, [aviatorState, betCycleIndex, hasCashedOut, autoCashOut, autoCashOutMultiplier]);
 
   const isUserBetActive = betCycleIndex === aviatorState.cycleIndex && !hasCashedOut;
+  const isUserInCurrentRound = betCycleIndex === aviatorState.cycleIndex;
 
+  // Place bet logic: STRICT RULE - cannot bet on an already flying plane
   const handlePlaceBet = () => {
+    if (aviatorState.status === 'flying') {
+      // Cannot bet mid-flight! Instead queue for upcoming round.
+      handleToggleQueueNextRound();
+      return;
+    }
+
     if (userBalance < betAmount) {
       sound.playClick();
       alert('অপর্যাপ্ত ব্যালেন্স! অনুগ্রহ করে ওয়ালেটে রিচার্জ করুন।');
       onOpenDeposit();
       return;
     }
+
     sound.playChip();
     onUpdateBalance(userBalance - betAmount);
     setBetCycleIndex(aviatorState.cycleIndex);
     setHasCashedOut(false);
     setCashedOutAt(null);
+  };
+
+  // Queue/Unqueue bet for next round when flight is in progress
+  const handleToggleQueueNextRound = () => {
+    if (queuedForNextRound) {
+      // Cancel queued bet
+      sound.playClick();
+      setQueuedForNextRound(false);
+    } else {
+      if (userBalance < betAmount) {
+        sound.playClick();
+        alert('অপর্যাপ্ত ব্যালেন্স! অনুগ্রহ করে ওয়ালেটে রিচার্জ করুন।');
+        onOpenDeposit();
+        return;
+      }
+      sound.playChip();
+      setQueuedForNextRound(true);
+      setQueuedBetAmount(betAmount);
+    }
   };
 
   const handleCashOut = (multiplierToUse?: number) => {
@@ -112,11 +305,19 @@ export function AviatorGame({
   };
 
   // Airplane flight visual position calculation
-  // Human-like smooth curve: normalized against a gentle 5x scale for screen bounds
   const flightProgress = Math.min(1, Math.max(0, (aviatorState.currentMultiplier - 1.0) / 4.5));
   const planeX = 12 + flightProgress * 72; // % across width
   const planeY = 78 - Math.pow(flightProgress, 0.8) * 58; // % from top
   const planeAngle = Math.min(38, 12 + flightProgress * 25);
+
+  // Filtered live players list based on active tab
+  const displayedBets = liveBets.filter((b) => {
+    if (activeTab === 'winners') return b.status === 'cashed_out';
+    return true;
+  });
+
+  const totalLiveStake = liveBets.reduce((acc, b) => acc + b.betAmount, 0) + (isUserInCurrentRound ? betAmount : 0);
+  const totalCashedOutCount = liveBets.filter((b) => b.status === 'cashed_out').length + (hasCashedOut && isUserInCurrentRound ? 1 : 0);
 
   return (
     <div className="w-full space-y-4 animate-in fade-in max-w-4xl mx-auto pb-10">
@@ -285,9 +486,9 @@ export function AviatorGame({
         </div>
       </div>
 
-      {/* Aviator Bet Controls Area */}
+      {/* Aviator Bet Controls Area & Dynamic Live Players Feed */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Bet Control 1 */}
+        {/* Bet Control Panel */}
         <div className="rounded-3xl bg-[#0a1738] border border-blue-500/30 p-4 sm:p-5 shadow-xl space-y-3.5">
           <div className="flex items-center justify-between text-xs">
             <span className="font-bold text-white flex items-center gap-1.5">
@@ -339,7 +540,7 @@ export function AviatorGame({
             </div>
           </div>
 
-          {/* Place Bet or Cash Out Button */}
+          {/* Action Button: Handles in-flight CashOut, Queued next-round, and strict mid-flight bet restriction */}
           {isUserBetActive && aviatorState.status === 'flying' ? (
             <button
               type="button"
@@ -352,49 +553,183 @@ export function AviatorGame({
                 {getSymbol(currency)}{(betAmount * aviatorState.currentMultiplier).toFixed(2)} ({aviatorState.currentMultiplier.toFixed(2)}x)
               </span>
             </button>
-          ) : hasCashedOut && betCycleIndex === aviatorState.cycleIndex ? (
-            <div className="w-full py-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-bold text-center flex items-center justify-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>ক্যাশআউট সফল: {cashedOutAt?.toFixed(2)}x (+{getSymbol(currency)}{(betAmount * (cashedOutAt || 1)).toFixed(2)})</span>
+          ) : hasCashedOut && isUserInCurrentRound ? (
+            <div className="space-y-2">
+              <div className="w-full py-3 rounded-2xl bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 font-bold text-center flex items-center justify-center gap-2 text-xs sm:text-sm">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>ক্যাশআউট সফল: {cashedOutAt?.toFixed(2)}x (+{getSymbol(currency)}{(betAmount * (cashedOutAt || 1)).toFixed(2)})</span>
+              </div>
+              {aviatorState.status === 'flying' && (
+                <button
+                  type="button"
+                  onClick={handleToggleQueueNextRound}
+                  className={`w-full py-3 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    queuedForNextRound
+                      ? 'bg-amber-600/30 border border-amber-500/50 text-amber-300 hover:bg-amber-600/40'
+                      : 'bg-blue-900/40 border border-blue-500/30 text-sky-200 hover:bg-blue-900/60'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>
+                    {queuedForNextRound
+                      ? `✓ পরবর্তী রাউন্ডে বুকড (${getSymbol(currency)}${queuedBetAmount}) — বাতিল করতে ক্লিক করুন`
+                      : `পরবর্তী রাউন্ডের জন্য বেট বুক করুন (${getSymbol(currency)}${betAmount})`}
+                  </span>
+                </button>
+              )}
+            </div>
+          ) : aviatorState.status === 'flying' && !isUserBetActive ? (
+            /* Strict Rule: Plane is in-flight and user didn't bet prior to takeoff -> Cannot bet mid-flight! */
+            <div className="space-y-2">
+              <div className="w-full py-2.5 px-3 rounded-2xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs text-center font-bold flex items-center justify-center gap-1.5">
+                <span>✈️ বিমান মাঝ আকাশে উড়ছে — চলতি রাউন্ডে নতুন বেট বন্ধ</span>
+              </div>
+              <button
+                type="button"
+                id="aviator-queue-bet-btn"
+                onClick={handleToggleQueueNextRound}
+                className={`w-full py-3.5 rounded-2xl font-black text-xs sm:text-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-lg active:scale-95 ${
+                  queuedForNextRound
+                    ? 'bg-gradient-to-r from-amber-600 to-yellow-600 text-white border border-amber-400/50'
+                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white'
+                }`}
+              >
+                <Clock className="w-4 h-4" />
+                <span>
+                  {queuedForNextRound
+                    ? `✓ পরবর্তী রাউন্ডে বুকড (${getSymbol(currency)}${queuedBetAmount}) — বাতিল করতে ট্যাপ করুন`
+                    : `পরবর্তী রাউন্ডের জন্য বেট বুক করুন (${getSymbol(currency)}${betAmount})`}
+                </span>
+              </button>
             </div>
           ) : (
+            /* Flight waiting countdown or crashed: ready to place bet for upcoming flight */
             <button
               type="button"
               id="aviator-place-bet-btn"
               onClick={handlePlaceBet}
-              className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm sm:text-base shadow-lg shadow-emerald-950/50 transition-all active:scale-95 cursor-pointer"
+              className={`w-full py-4 rounded-2xl font-black text-sm sm:text-base shadow-lg transition-all active:scale-95 cursor-pointer ${
+                isUserInCurrentRound
+                  ? 'bg-emerald-900/60 border border-emerald-500/40 text-emerald-300 pointer-events-none'
+                  : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-950/50'
+              }`}
             >
-              এই রাউন্ডে বেট করুন ({getSymbol(currency)}{betAmount})
+              {isUserInCurrentRound
+                ? `✓ এই রাউন্ডে বেট কনফার্মড (${getSymbol(currency)}${betAmount})`
+                : `এই রাউন্ডে বেট করুন (${getSymbol(currency)}${betAmount})`}
             </button>
           )}
         </div>
 
-        {/* Live Bets by Other Players */}
-        <div className="rounded-3xl bg-[#0a1738] border border-blue-500/30 p-4 sm:p-5 shadow-xl space-y-2.5">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-300 pb-2 border-b border-blue-900/40">
-            <span>লাইভ প্লেয়ার বেটিং লিস্ট ({liveBets.length})</span>
-            <span className="text-emerald-400 font-mono text-[11px] flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" /> সিনক্রোনাইজড
+        {/* Dynamic Live Players Feed with Real-Time Dynamic Cashouts */}
+        <div className="rounded-3xl bg-[#0a1738] border border-blue-500/30 p-4 sm:p-5 shadow-xl space-y-3 flex flex-col">
+          <div className="flex items-center justify-between text-xs pb-2 border-b border-blue-900/50">
+            <div className="flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-sky-400" />
+              <span className="font-black text-white">লাইভ প্লেয়ার বেটিং লিস্ট ({liveBets.length + (isUserInCurrentRound ? 1 : 0)})</span>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] text-slate-400 font-mono block">মোট বেট: {getSymbol(currency)}{totalLiveStake.toLocaleString('en-US')}</span>
+            </div>
+          </div>
+
+          {/* Filter tabs */}
+          <div className="flex items-center gap-1.5">
+            {[
+              { id: 'all', label: `সব প্লেয়ার (${liveBets.length + (isUserInCurrentRound ? 1 : 0)})` },
+              { id: 'winners', label: `ক্যাশআউট (${totalCashedOutCount})` },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+                  activeTab === tab.id
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-[#08122c] text-slate-400 hover:text-white border border-blue-900/50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+            <span className="ml-auto text-[10px] text-emerald-400 font-mono font-bold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" /> লাইভ আপডেট
             </span>
           </div>
 
-          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-            {liveBets.map((b) => (
-              <div
-                key={b.id}
-                className="flex items-center justify-between p-2.5 rounded-xl bg-[#08122c] border border-blue-500/20 text-xs"
-              >
+          {/* Players Feed List */}
+          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 flex-1">
+            {/* User's own bet pinned at the top if placed */}
+            {isUserInCurrentRound && (
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-amber-500/20 border-2 border-amber-400/80 text-xs shadow-md">
                 <div className="flex items-center gap-2">
-                  <span>{b.avatar}</span>
-                  <span className="font-mono text-slate-300">{b.user}</span>
+                  <span className="text-sm">👑</span>
+                  <div>
+                    <span className="font-bold text-amber-300 font-display">আপনি (YOU)</span>
+                    <span className="text-[10px] text-slate-400 block font-mono">আমার বেট</span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="font-mono font-bold text-slate-200">
+                  <span className="font-mono font-black text-white">
+                    {getSymbol(currency)}{betAmount}
+                  </span>
+                  {hasCashedOut ? (
+                    <span className="px-2 py-0.5 rounded-lg bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 font-mono font-bold text-[11px]">
+                      ✓ {cashedOutAt?.toFixed(2)}x (+{getSymbol(currency)}{(betAmount * (cashedOutAt || 1)).toFixed(2)})
+                    </span>
+                  ) : aviatorState.status === 'flying' ? (
+                    <span className="px-2 py-0.5 rounded-lg bg-blue-900/60 text-amber-300 font-mono font-bold text-[11px] animate-pulse">
+                      উড়ছে {aviatorState.currentMultiplier.toFixed(2)}x
+                    </span>
+                  ) : aviatorState.status === 'crashed' ? (
+                    <span className="px-2 py-0.5 rounded-lg bg-rose-950/60 text-rose-300 font-mono font-bold text-[11px]">
+                      ✕ ক্র্যাশড
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 font-mono text-[11px]">প্রস্তুত</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {displayedBets.map((b) => (
+              <div
+                key={b.id}
+                className={`flex items-center justify-between p-2 rounded-xl border text-xs transition-all ${
+                  b.status === 'cashed_out'
+                    ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-200'
+                    : b.status === 'crashed'
+                    ? 'bg-rose-950/20 border-rose-900/30 text-slate-400'
+                    : 'bg-[#08122c] border-blue-500/20 text-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-sm shrink-0">{b.avatar}</span>
+                  <span className="font-mono font-bold text-slate-300 truncate max-w-[90px] sm:max-w-[120px]">
+                    {b.user}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <span className="font-mono font-bold text-slate-300">
                     {getSymbol(currency)}{b.betAmount}
                   </span>
-                  <span className="font-mono text-[11px] text-amber-400 font-bold">
-                    {aviatorState.status === 'flying' ? `${aviatorState.currentMultiplier.toFixed(2)}x` : '—'}
-                  </span>
+
+                  {b.status === 'cashed_out' ? (
+                    <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-bold text-[10px]">
+                      ✓ {b.cashedOutMultiplier?.toFixed(2)}x (+{getSymbol(currency)}{b.payout?.toLocaleString('en-US')})
+                    </span>
+                  ) : b.status === 'crashed' ? (
+                    <span className="px-2 py-0.5 rounded-lg bg-rose-950/50 text-rose-400 border border-rose-500/20 font-mono text-[10px]">
+                      ✕ ক্র্যাশড
+                    </span>
+                  ) : aviatorState.status === 'flying' ? (
+                    <span className="px-2 py-0.5 rounded-lg bg-blue-950/60 text-amber-400 font-mono font-bold text-[10px] animate-pulse">
+                      {aviatorState.currentMultiplier.toFixed(2)}x
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 font-mono text-[10px]">অপেক্ষমান</span>
+                  )}
                 </div>
               </div>
             ))}
