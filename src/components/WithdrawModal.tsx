@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { ArrowDownToLine, CheckCircle2, X, AlertCircle, Lock } from 'lucide-react';
+import { ArrowDownToLine, CheckCircle2, X, AlertCircle, Lock, Clock } from 'lucide-react';
 import { Currency } from '../types';
 import { sound } from '../utils/audio';
+import { saveWithdrawalRequest, WithdrawalRequest } from '../utils/firebase';
 
 interface WithdrawModalProps {
   onClose: () => void;
   userBalance: number;
   onUpdateBalance: (newBalance: number) => void;
   currency: Currency;
+  userId?: string;
+  username?: string;
+  userPhone?: string;
 }
 
 export function WithdrawModal({
@@ -15,14 +19,18 @@ export function WithdrawModal({
   userBalance,
   onUpdateBalance,
   currency,
+  userId = 'VW889241',
+  username = 'Player_8892',
+  userPhone = '01712345678',
 }: WithdrawModalProps) {
   const [method, setMethod] = useState<'bkash' | 'nagad' | 'bank' | 'usdt'>('bkash');
-  const [accountNumber, setAccountNumber] = useState<string>('01799824105');
-  const [accountName, setAccountName] = useState<string>('Kamran Ahmed');
-  const [amount, setAmount] = useState<string>('2000');
+  const [accountNumber, setAccountNumber] = useState<string>(userPhone || '01799824105');
+  const [accountName, setAccountName] = useState<string>(username || 'Kamran Ahmed');
+  const [amount, setAmount] = useState<string>('1000');
   const [pin, setPin] = useState<string>('1234');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [submittedReq, setSubmittedReq] = useState<WithdrawalRequest | null>(null);
 
   const getSymbol = (c: Currency) => (c === 'BDT' ? '৳' : c === 'INR' ? '₹' : '$');
 
@@ -31,24 +39,47 @@ export function WithdrawModal({
     const withdrawAmount = parseFloat(amount);
 
     if (isNaN(withdrawAmount) || withdrawAmount < 500) {
-      alert('Minimum withdrawal amount is 500.');
+      alert('সর্বনিম্ন উইথড্র পরিমাণ ৫০০ টাকা (Minimum withdrawal amount is 500)।');
       return;
     }
 
     if (withdrawAmount > userBalance) {
-      alert('Withdrawal amount exceeds your current wallet balance.');
+      alert('আপনার ওয়ালেটে পর্যাপ্ত ব্যালেন্স নেই (Withdrawal exceeds balance)।');
+      return;
+    }
+
+    if (!accountNumber.trim()) {
+      alert('অনুগ্রহ করে সঠিক প্রাপক নম্বর বা একাউন্ট নম্বর দিন।');
       return;
     }
 
     setIsSubmitting(true);
     sound.playChip();
 
+    const newReqId = 'WTH_' + Date.now();
+    const newReq: WithdrawalRequest = {
+      id: newReqId,
+      uid: userId,
+      username: username,
+      phone: userPhone,
+      method,
+      accountNumber: accountNumber.trim(),
+      accountName: accountName.trim(),
+      amount: withdrawAmount,
+      status: 'pending',
+      createdAt: Date.now(),
+      formattedTime: new Date().toLocaleTimeString(),
+    };
+
+    saveWithdrawalRequest(newReq);
+    setSubmittedReq(newReq);
+
     setTimeout(() => {
       setIsSubmitting(false);
       onUpdateBalance(userBalance - withdrawAmount);
       setSuccess(true);
       sound.playWin();
-    }, 1200);
+    }, 1000);
   };
 
   return (
@@ -80,17 +111,37 @@ export function WithdrawModal({
               <CheckCircle2 className="w-10 h-10" />
             </div>
             <div>
-              <h3 className="text-xl font-black text-white font-display">Request Submitted!</h3>
-              <p className="text-xs text-slate-300 mt-1">
-                Your withdrawal of {getSymbol(currency)}{amount} to {accountNumber} is being processed. Funds will arrive within 3-10 minutes.
+              <h3 className="text-xl font-black text-white font-display">উইথড্র রিকোয়েস্ট সফলভাবে গৃহীত!</h3>
+              <p className="text-xs text-slate-300 mt-2">
+                আপনার {getSymbol(currency)}{amount} টাকা উত্তোলনের রিকোয়েস্টটি এডমিন প্যানেলে অনুমোদনের অপেক্ষায় পাঠানো হয়েছে। এডমিন ভেরিফাই করে আপনার {method.toUpperCase()} ({accountNumber}) নম্বরে টাকা পাঠিয়ে দেবেন।
               </p>
+            </div>
+            <div className="p-3 bg-[#060e22] rounded-2xl border border-blue-500/30 text-left text-xs space-y-1.5 font-mono">
+              <div className="flex justify-between text-slate-400">
+                <span>রিকোয়েস্ট আইডি:</span>
+                <span className="text-amber-400 font-bold">{submittedReq?.id}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>উইথড্র মেথড:</span>
+                <span className="text-white uppercase font-bold">{method}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>একাউন্ট নম্বর:</span>
+                <span className="text-white">{accountNumber}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>স্ট্যাটাস:</span>
+                <span className="text-amber-400 font-bold flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 animate-spin" /> এডমিন রিভিউ পেন্ডিং (Pending)
+                </span>
+              </div>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm"
+              className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-sm shadow-lg shadow-amber-900/30 transition-all cursor-pointer active:scale-95"
             >
-              Done
+              ঠিক আছে
             </button>
           </div>
         ) : (

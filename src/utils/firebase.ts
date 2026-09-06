@@ -61,6 +61,22 @@ export interface DepositRequest {
   approvedAt?: number;
 }
 
+export interface WithdrawalRequest {
+  id: string;
+  uid: string;
+  username: string;
+  phone?: string;
+  method: 'bkash' | 'nagad' | 'rocket' | 'upay' | 'bank' | 'usdt';
+  accountNumber: string;
+  accountName: string;
+  amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+  formattedTime: string;
+  approvedAt?: number;
+  rejectReason?: string;
+}
+
 export interface GiftCodeItem {
   code: string;
   rewardAmount: number;
@@ -419,6 +435,118 @@ export function updateDepositRequestStatus(reqId: string, status: 'approved' | '
       });
 
       // Dispatch global window event so active browser window updates user balance in real-time
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('victorwin_user_balance_updated', {
+            detail: { uid: targetMember.uid, phone: targetMember.phone, newBalance: newBal },
+          })
+        );
+      }
+    }
+  }
+}
+
+// Withdrawal requests management for Admin & User
+const WITHDRAWAL_REQUESTS_KEY = 'victorwin_withdrawal_queue_v1';
+
+export const DEFAULT_WITHDRAWALS: WithdrawalRequest[] = [
+  {
+    id: 'WTH_1725372800100',
+    uid: 'VW774102',
+    username: 'Riya_Akter',
+    phone: '01899112233',
+    method: 'bkash',
+    accountNumber: '01899112233',
+    accountName: 'Riya Akter',
+    amount: 1500,
+    status: 'pending',
+    createdAt: Date.now() - 15 * 60 * 1000,
+    formattedTime: '15 mins ago',
+  },
+  {
+    id: 'WTH_1725372800200',
+    uid: 'VW558190',
+    username: 'Habibur_Rahman',
+    phone: '01722883344',
+    method: 'nagad',
+    accountNumber: '01722883344',
+    accountName: 'Habibur Rahman',
+    amount: 2500,
+    status: 'approved',
+    createdAt: Date.now() - 2 * 60 * 60 * 1000,
+    formattedTime: '2 hours ago',
+    approvedAt: Date.now() - 100 * 60 * 1000,
+  },
+];
+
+export function getLocalWithdrawalRequests(): WithdrawalRequest[] {
+  try {
+    const raw = localStorage.getItem(WITHDRAWAL_REQUESTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+  return DEFAULT_WITHDRAWALS;
+}
+
+export function saveWithdrawalRequest(req: WithdrawalRequest) {
+  const list = getLocalWithdrawalRequests();
+  const updated = [req, ...list.filter((r) => r.id !== req.id)].slice(0, 100);
+  localStorage.setItem(WITHDRAWAL_REQUESTS_KEY, JSON.stringify(updated));
+
+  // Try pushing to Firebase collection
+  try {
+    const wthDocRef = doc(db, 'withdrawal_requests', req.id);
+    setDoc(wthDocRef, req, { merge: true }).catch(() => {});
+  } catch (e) {}
+}
+
+export function updateWithdrawalRequestStatus(
+  reqId: string,
+  status: 'approved' | 'rejected',
+  rejectReason?: string
+) {
+  const list = getLocalWithdrawalRequests();
+  const targetReq = list.find((r) => r.id === reqId);
+  const updated = list.map((r) =>
+    r.id === reqId
+      ? {
+          ...r,
+          status,
+          rejectReason: rejectReason || r.rejectReason,
+          approvedAt: status === 'approved' ? Date.now() : undefined,
+        }
+      : r
+  );
+  localStorage.setItem(WITHDRAWAL_REQUESTS_KEY, JSON.stringify(updated));
+
+  try {
+    const wthDocRef = doc(db, 'withdrawal_requests', reqId);
+    updateDoc(wthDocRef, {
+      status,
+      rejectReason: rejectReason || '',
+      approvedAt: status === 'approved' ? Date.now() : undefined,
+    }).catch(() => {});
+  } catch (e) {}
+
+  // If rejected, refund the money back to user wallet!
+  if (status === 'rejected' && targetReq && targetReq.status === 'pending') {
+    const members = getLocalMembers();
+    const targetMember = members.find(
+      (m) =>
+        m.uid === targetReq.uid ||
+        (targetReq.phone && m.phone === targetReq.phone) ||
+        (targetReq.username && m.username === targetReq.username)
+    );
+
+    if (targetMember) {
+      const refundAmount = targetReq.amount || 0;
+      const newBal = (targetMember.balance || 0) + refundAmount;
+      updateLocalMember(targetMember.uid, {
+        balance: newBal,
+      });
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('victorwin_user_balance_updated', {

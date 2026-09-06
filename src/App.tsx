@@ -834,6 +834,9 @@ export default function App() {
           userBalance={user.balance}
           onUpdateBalance={handleUpdateBalance}
           currency={currency}
+          userId={user.id}
+          username={user.username}
+          userPhone={user.phone}
         />
       )}
 
