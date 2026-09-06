@@ -47,7 +47,7 @@ import {
 } from './types';
 import { INITIAL_USER, GAMES_CATALOGUE } from './data/mockData';
 import { sound } from './utils/audio';
-import { getLocalConfig, getLocalMembers, saveLocalMember } from './utils/firebase';
+import { getLocalConfig, getLocalMembers, saveLocalMember, updateLocalMember, DEFAULT_VIP_SETTINGS } from './utils/firebase';
 import {
   ShieldCheck,
   Sparkles,
@@ -58,10 +58,40 @@ import {
 
 const AUTO_LOGOUT_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours of inactivity
 const LAST_ACTIVE_KEY = 'victor_last_active_timestamp';
+const SESSION_USER_KEY = 'victor_session_user';
+const LAST_LOGIN_TIME_KEY = 'victor_last_login_time';
+
+function loadPersistedUser(): UserProfile {
+  try {
+    const raw = localStorage.getItem(SESSION_USER_KEY);
+    const loginTime = localStorage.getItem(LAST_LOGIN_TIME_KEY);
+    if (raw && loginTime) {
+      const elapsed = Date.now() - parseInt(loginTime, 10);
+      if (elapsed < AUTO_LOGOUT_DURATION_MS) {
+        const parsed = JSON.parse(raw);
+        const members = getLocalMembers();
+        const member = members.find(m => m.uid === parsed.id || (parsed.phone && m.phone === parsed.phone));
+        if (member && member.status !== 'banned') {
+          return {
+            ...INITIAL_USER,
+            ...parsed,
+            balance: typeof member.balance === 'number' ? member.balance : parsed.balance,
+            vipLevel: member.vipLevel || parsed.vipLevel || 1,
+            vipExp: member.vipExp || parsed.vipExp || 0,
+            isLoggedIn: true,
+          };
+        }
+        return { ...INITIAL_USER, ...parsed, isLoggedIn: true };
+      }
+    }
+  } catch (e) {}
+  return INITIAL_USER;
+}
 
 export default function App() {
-  // Global State
-  const [user, setUser] = useState<UserProfile>(INITIAL_USER);
+  // Global State with 24-hour persistence
+  const [user, setUser] = useState<UserProfile>(() => loadPersistedUser());
+  const betFractionRef = useRef<number>(0);
   const [language, setLanguage] = useState<Language>('bn');
   const [currency, setCurrency] = useState<Currency>('BDT');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -207,25 +237,88 @@ export default function App() {
     if (next) sound.playClick();
   };
 
-  // Update Balance
-  const handleUpdateBalance = (newBalance: number) => {
-    setUser((prev) => ({
-      ...prev,
-      balance: Math.max(0, newBalance),
-    }));
+  // Sync logged in user profile changes to local storage session
+  useEffect(() => {
+    if (user.isLoggedIn && user.id) {
+      try {
+        localStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
+      } catch (e) {}
+    }
+  }, [user]);
+
+  // Update Balance and VIP Experience (100 BDT bet = 1 VIP bet/exp)
+  const handleUpdateBalance = (newBalance: number, isBet: boolean = true) => {
+    setUser((prev) => {
+      const diff = prev.balance - newBalance;
+      let newVipExp = prev.vipExp || 0;
+      let newVipLevel = prev.vipLevel || 1;
+
+      if (isBet && diff > 0) {
+        // Every 100 BDT bet counts as 1 VIP bet count
+        const totalAccum = betFractionRef.current + diff;
+        const countToAdd = Math.floor(totalAccum / 100);
+        betFractionRef.current = totalAccum % 100;
+
+        if (countToAdd > 0) {
+          newVipExp += countToAdd;
+          const sysCfg = getLocalConfig();
+          const tiers = sysCfg.vipSettings && sysCfg.vipSettings.length > 0 ? sysCfg.vipSettings : DEFAULT_VIP_SETTINGS;
+          const nextTier = tiers.find((t) => t.level === newVipLevel + 1);
+          if (nextTier && newVipExp >= nextTier.requiredBetCount) {
+            newVipLevel = nextTier.level;
+          }
+        }
+      }
+
+      const updatedUser: UserProfile = {
+        ...prev,
+        balance: Math.max(0, newBalance),
+        vipExp: newVipExp,
+        vipLevel: newVipLevel,
+      };
+
+      if (prev.id) {
+        updateLocalMember(prev.id, {
+          balance: updatedUser.balance,
+          vipExp: updatedUser.vipExp,
+          vipLevel: updatedUser.vipLevel,
+        });
+      }
+
+      try {
+        if (updatedUser.isLoggedIn) {
+          localStorage.setItem(SESSION_USER_KEY, JSON.stringify(updatedUser));
+        }
+      } catch (e) {}
+
+      return updatedUser;
+    });
   };
 
   // Refresh Balance Trigger
   const handleRefreshBalance = () => {
-    setUser((prev) => ({
-      ...prev,
-      balance: prev.balance,
-    }));
+    setUser((prev) => {
+      const members = getLocalMembers();
+      const fresh = members.find((m) => m.uid === prev.id || (prev.phone && m.phone === prev.phone));
+      if (fresh) {
+        return {
+          ...prev,
+          balance: typeof fresh.balance === 'number' ? fresh.balance : prev.balance,
+          vipLevel: fresh.vipLevel || prev.vipLevel,
+          vipExp: fresh.vipExp || prev.vipExp,
+        };
+      }
+      return { ...prev };
+    });
   };
 
   // Handle Logout
   const handleLogout = () => {
     sound.playClick();
+    try {
+      localStorage.removeItem(SESSION_USER_KEY);
+      localStorage.removeItem(LAST_LOGIN_TIME_KEY);
+    } catch (e) {}
     setUser((prev) => ({
       ...prev,
       isLoggedIn: false,
@@ -845,7 +938,13 @@ export default function App() {
           initialMode={showAuth.mode}
           onClose={() => setShowAuth({ open: false, mode: 'login' })}
           onLoginSuccess={(userData, wasRegister) => {
-            setUser((prev) => ({ ...prev, ...userData }));
+            const updated = { ...user, ...userData, isLoggedIn: true };
+            try {
+              localStorage.setItem(LAST_LOGIN_TIME_KEY, String(Date.now()));
+              localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now()));
+              localStorage.setItem(SESSION_USER_KEY, JSON.stringify(updated));
+            } catch (e) {}
+            setUser(updated);
             if (userData.role === 'admin') {
               setIsAdminPageActive(true);
             } else if (wasRegister) {

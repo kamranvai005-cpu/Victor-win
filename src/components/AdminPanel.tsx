@@ -44,6 +44,8 @@ import {
   X,
   Menu,
   Download,
+  ArrowDownToLine,
+  Crown,
 } from 'lucide-react';
 import {
   SystemConfig,
@@ -51,10 +53,15 @@ import {
   DepositRequest,
   GiftCodeItem,
   RegisteredMember,
+  WithdrawalRequest,
+  VipTierConfig,
+  DEFAULT_VIP_SETTINGS,
   getLocalConfig,
   updateSystemConfig,
   getLocalDepositRequests,
   updateDepositRequestStatus,
+  getLocalWithdrawalRequests,
+  updateWithdrawalRequestStatus,
   subscribeSystemConfig,
   subscribeMembers,
   getLocalMembers,
@@ -80,7 +87,7 @@ interface AdminPanelProps {
 export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: AdminPanelProps) {
   // Navigation tabs
   const [activeNav, setActiveNav] = useState<
-    'dashboard' | 'users' | 'devices' | 'giftcodes' | 'market' | 'livebets' | 'deposits' | 'gateways' | 'games' | 'commissions' | 'system'
+    'dashboard' | 'users' | 'devices' | 'giftcodes' | 'market' | 'livebets' | 'deposits' | 'withdrawals' | 'vip' | 'gateways' | 'games' | 'commissions' | 'system'
   >('dashboard');
 
   // Mobile/responsive sidebar drawer state
@@ -89,9 +96,19 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
   // Live Firebase Synchronized System Config
   const [config, setConfig] = useState<SystemConfig>(() => getLocalConfig());
   const [depositRequests, setDepositRequests] = useState<DepositRequest[]>(() => getLocalDepositRequests());
+  const [withdrawalRequests, setWithdrawalRequests] = useState<WithdrawalRequest[]>(() => getLocalWithdrawalRequests());
   const [members, setMembers] = useState<RegisteredMember[]>(() => getLocalMembers());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+
+  // Withdrawal requests and Auto-match state
+  const [withdrawalFilter, setWithdrawalFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [autoMatchText, setAutoMatchText] = useState('');
+
+  // VIP Settings state for Admin Panel
+  const [vipSettingsState, setVipSettingsState] = useState<VipTierConfig[]>(() =>
+    config.vipSettings && config.vipSettings.length > 0 ? config.vipSettings : DEFAULT_VIP_SETTINGS
+  );
 
   // Ban Reason Modal state
   const [banModalMember, setBanModalMember] = useState<RegisteredMember | null>(null);
@@ -146,6 +163,7 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
       setLiveWinGo(getRealtimeWinGo(30));
       setLiveAviator(getRealtimeAviator());
       setDepositRequests(getLocalDepositRequests());
+      setWithdrawalRequests(getLocalWithdrawalRequests());
       setLiveBets(getStoredLiveBets());
       setCurrentTime(new Date().toLocaleTimeString());
     }, 1000);
@@ -327,6 +345,75 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
     showToast(`ডিপোজিট রিকোয়েস্ট ${status === 'approved' ? 'অনুমোদিত ও ব্যালেন্সে টাকা যোগ' : 'প্রত্যাখ্যাত'} হয়েছে!`);
   };
 
+  const handleWithdrawalAction = (id: string, status: 'approved' | 'rejected', reason?: string) => {
+    if (status === 'approved') {
+      sound.playWin();
+    } else {
+      sound.playLose();
+    }
+    updateWithdrawalRequestStatus(id, status, reason);
+    setWithdrawalRequests(getLocalWithdrawalRequests());
+    setMembers(getLocalMembers());
+    showToast(
+      `উইথড্র রিকোয়েস্ট ${status === 'approved' ? 'সফলভাবে অনুমোদন করা হয়েছে (Success)' : 'বাতিল ও টাকা রিফান্ড করা হয়েছে'}!`
+    );
+  };
+
+  const handleAutoMatchDeposits = () => {
+    if (!autoMatchText.trim()) {
+      showToast('অনুগ্রহ করে ট্রানজেকশন আইডি বা এসএমএস পেস্ট করুন!');
+      return;
+    }
+
+    const rawTokens = autoMatchText.match(/[a-zA-Z0-9]{6,20}/g) || [];
+    const candidateIds = Array.from(new Set(rawTokens.map((t) => t.trim().toUpperCase())));
+
+    if (candidateIds.length === 0) {
+      showToast('কোনো বৈধ ট্রানজেকশন আইডি পাওয়া যায়নি!');
+      return;
+    }
+
+    const currentRequests = getLocalDepositRequests();
+    const pending = currentRequests.filter((r) => r.status === 'pending');
+    let matchCount = 0;
+
+    for (const req of pending) {
+      const cleanTrx = (req.trxId || '').trim().toUpperCase();
+      if (cleanTrx && candidateIds.includes(cleanTrx)) {
+        updateDepositRequestStatus(req.id, 'approved');
+        matchCount++;
+      }
+    }
+
+    if (matchCount > 0) {
+      sound.playWin();
+      setDepositRequests(getLocalDepositRequests());
+      setMembers(getLocalMembers());
+      setAutoMatchText('');
+      showToast(`✓ চমৎকার! ${matchCount} টি পেন্ডিং ডিপোজিট স্বয়ংক্রিয়ভাবে মিলে অনুমোদিত হয়েছে!`);
+    } else {
+      sound.playClick();
+      showToast('কোনো পেন্ডিং ডিপোজিট রিকোয়েস্টের TrxID এর সাথে মেলেনি।');
+    }
+  };
+
+  const handleSaveVipSettings = () => {
+    sound.playWin();
+    const updatedConfig = {
+      ...config,
+      vipSettings: vipSettingsState,
+    };
+    setConfig(updatedConfig);
+    updateSystemConfig(updatedConfig);
+    showToast('✓ সব VIP লেভেল ও মাসিক বেতন সেটিংস সফলভাবে সেভ করা হয়েছে!');
+  };
+
+  const handleUpdateVipTier = (level: number, field: keyof VipTierConfig, value: any) => {
+    setVipSettingsState((prev) =>
+      prev.map((t) => (t.level === level ? { ...t, [field]: value } : t))
+    );
+  };
+
   const filteredMembers = members.filter((m) => {
     const q = userSearch.toLowerCase();
     return (
@@ -339,15 +426,19 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
   // Calculate platform totals
   const totalMemberBalance = members.reduce((sum, m) => sum + (m.balance || 0), 0);
   const pendingDeposits = depositRequests.filter((d) => d.status === 'pending');
+  const pendingWithdrawals = withdrawalRequests.filter((w) => w.status === 'pending');
   const totalApprovedDepositAmount = depositRequests
     .filter((d) => d.status === 'approved')
     .reduce((sum, d) => sum + (d.amount || 0), 0);
+  const totalApprovedWithdrawalAmount = withdrawalRequests
+    .filter((w) => w.status === 'approved')
+    .reduce((sum, w) => sum + (w.amount || 0), 0);
   const totalMemberDeposited = members.reduce((sum, m) => sum + (m.totalDeposit || 0), 0);
   const totalReferralRegistrations = members.reduce((sum, m) => sum + (m.referralCount || 0), 0);
   const totalReferralDepositors = members.reduce((sum, m) => sum + (m.referralDepositsCount || 0), 0);
 
   interface NavItem {
-    id: 'dashboard' | 'users' | 'devices' | 'giftcodes' | 'market' | 'livebets' | 'deposits' | 'gateways' | 'games' | 'commissions' | 'system';
+    id: 'dashboard' | 'users' | 'devices' | 'giftcodes' | 'market' | 'livebets' | 'deposits' | 'withdrawals' | 'vip' | 'gateways' | 'games' | 'commissions' | 'system';
     label: string;
     icon: any;
     count: string | number | null;
@@ -376,7 +467,9 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
     { id: 'giftcodes', label: 'গিফট কোড স্টুডিও', icon: Gift, count: (config.giftCodes || []).length },
     { id: 'market', label: 'উইন গো ও এভিয়েটর সিগন্যাল', icon: Sliders, count: 'LIVE' },
     { id: 'livebets', label: 'লাইভ বেট মনিটরিং', icon: Activity, count: `${liveBets.length} Bets`, highlight: true },
-    { id: 'deposits', label: 'ডিপোজিট অনুমোদন', icon: DollarSign, count: pendingDeposits.length || null, highlight: pendingDeposits.length > 0 },
+    { id: 'deposits', label: 'ডিপোজিট ও অটো-ম্যাচ', icon: DollarSign, count: pendingDeposits.length || null, highlight: pendingDeposits.length > 0 },
+    { id: 'withdrawals', label: 'উইথড্র রিকোয়েস্ট অনুমোদন', icon: ArrowDownToLine, count: pendingWithdrawals.length || null, highlight: pendingWithdrawals.length > 0 },
+    { id: 'vip', label: 'VIP বেতন ও লেভেল সেটিং', icon: Crown, count: 'VIP 1-8' },
     { id: 'gateways', label: 'পেমেন্ট গেটওয়ে সেটিং', icon: CreditCard, count: Object.keys(config.gateways).length },
     { id: 'games', label: 'গেম এক্টিভেশন কন্ট্রোল', icon: Gamepad2, count: null },
     { id: 'commissions', label: '৬-লেভেল রেফার কমিশন', icon: Share2, count: null },
@@ -2142,6 +2235,42 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
                 </div>
               </div>
 
+              {/* Auto-Match TrxID Submissions */}
+              <div className="bg-gradient-to-r from-blue-950/80 via-[#07153a] to-blue-950/80 p-4 rounded-3xl border border-sky-500/40 space-y-3 shadow-lg">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-5 h-5 text-amber-400 shrink-0" />
+                    <div>
+                      <h4 className="text-sm font-black text-white">স্বয়ংক্রিয় TrxID ম্যাচ ও বালক অনুমোদন (Auto-Match)</h4>
+                      <p className="text-[11px] text-slate-300">
+                        বিকাশ বা নগদে আসা এসএমএস অথবা ট্রানজেকশন আইডি এখানে পেস্ট করে সাবমিট দিন। সিস্টেম পেন্ডিং ডিপোজিটের সাথে মিলিয়ে সাথে সাথে ব্যালেন্স যোগ করে দেবে।
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2.5 py-1 rounded-full border border-amber-500/40 font-bold whitespace-nowrap">
+                    পেন্ডিং: {pendingDeposits.length} টি
+                  </span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <textarea
+                    rows={2}
+                    value={autoMatchText}
+                    onChange={(e) => setAutoMatchText(e.target.value)}
+                    placeholder="এসএমএস বা TrxID পেস্ট করুন (যেমন: 9J8AK81L, 9J8AK82M অথবা সম্পূর্ণ এসএমএস বার্তা)..."
+                    className="flex-1 px-3 py-2 rounded-xl bg-[#030919] border border-blue-500/30 text-xs text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAutoMatchDeposits}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-black shadow-lg shadow-emerald-900/30 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>অটো-ম্যাচ ও অনুমোদন</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Status Filter Tabs */}
               <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                 {[
@@ -2271,6 +2400,290 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
                     </div>
                   );
                 })()}
+              </div>
+            </div>
+          )}
+
+          {/* ================= WITHDRAWAL REQUESTS APPROVAL QUEUE ================= */}
+          {activeNav === 'withdrawals' && (
+            <div className="space-y-4 animate-in fade-in">
+              <div className="bg-[#060e22] p-4 rounded-3xl border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    <ArrowDownToLine className="w-5 h-5 text-amber-400" />
+                    <span>উইথড্র রিকোয়েস্ট অনুমোদন কিউ ({withdrawalRequests.length} টি)</span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    ইউজারের উইথড্র রিকোয়েস্ট যাচাই করে অনুমোদন দিন। অনুমোদন দিলে ইউজারের কাছে "Success" দেখাবে, আর বাতিল করলে টাকা রিফান্ড হবে।
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-xs text-slate-400 block">মোট অনুমোদিত উইথড্র:</span>
+                  <span className="text-base font-black font-mono text-emerald-400">
+                    ৳{totalApprovedWithdrawalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status Filter Tabs */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                {[
+                  { id: 'all', label: `সবগুলো (${withdrawalRequests.length})` },
+                  { id: 'pending', label: `⏳ অপেক্ষমান (${withdrawalRequests.filter(w => w.status === 'pending').length})`, color: 'text-amber-300' },
+                  { id: 'approved', label: `✓ অনুমোদিত/সাক্সেস (${withdrawalRequests.filter(w => w.status === 'approved').length})`, color: 'text-emerald-300' },
+                  { id: 'rejected', label: `✕ বাতিল/রিফান্ড (${withdrawalRequests.filter(w => w.status === 'rejected').length})`, color: 'text-rose-300' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setWithdrawalFilter(tab.id as any)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                      withdrawalFilter === tab.id
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : 'bg-[#060e22] text-slate-400 hover:text-white border border-blue-900/60'
+                    }`}
+                  >
+                    <span className={withdrawalFilter === tab.id ? 'text-white' : tab.color}>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-3xl bg-[#060e22] border border-blue-500/30 overflow-hidden shadow-xl">
+                {(() => {
+                  const filteredQueue = withdrawalRequests.filter((w) =>
+                    withdrawalFilter === 'all' ? true : w.status === withdrawalFilter
+                  );
+
+                  if (filteredQueue.length === 0) {
+                    return (
+                      <div className="p-8 text-center text-xs text-slate-400">
+                        কোনো {withdrawalFilter === 'pending' ? 'অপেক্ষমান' : withdrawalFilter === 'approved' ? 'অনুমোদিত' : withdrawalFilter === 'rejected' ? 'বাতিলকৃত' : ''} উইথড্র রিকোয়েস্ট নেই।
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="divide-y divide-blue-950/60">
+                      {filteredQueue.map((req) => (
+                        <div
+                          key={req.id}
+                          className="p-4 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 hover:bg-[#0a1738] transition-colors"
+                        >
+                          <div className="space-y-2 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-900 text-sky-200 uppercase font-mono">
+                                {req.gateway}
+                              </span>
+                              <span className="text-base font-black font-mono text-emerald-400">
+                                ৳{req.amount}
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  req.status === 'pending'
+                                    ? 'bg-amber-500/20 text-amber-300 animate-pulse'
+                                    : req.status === 'approved'
+                                    ? 'bg-emerald-500/20 text-emerald-300'
+                                    : 'bg-rose-500/20 text-rose-300'
+                                }`}
+                              >
+                                {req.status === 'pending'
+                                  ? '⏳ অপেক্ষমান (Pending)'
+                                  : req.status === 'approved'
+                                  ? '✓ অনুমোদিত (Success)'
+                                  : '✕ বাতিলকৃত (Refunded)'}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs text-slate-300 pt-1">
+                              <div className="bg-[#08122c] px-3 py-1.5 rounded-xl border border-blue-900/50">
+                                <span className="text-slate-400 text-[10px] block">ইউজার তথ্য:</span>
+                                <strong className="text-white">{req.userName || 'Member'}</strong>
+                                <span className="text-slate-400 text-[11px] block">UID: {req.userId}</span>
+                              </div>
+
+                              <div className="bg-[#08122c] px-3 py-1.5 rounded-xl border border-blue-900/50">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-slate-400 text-[10px]">টাকা পাঠানোর নম্বর:</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(req.accountNumber);
+                                      showToast(`নম্বর ${req.accountNumber} কপি হয়েছে!`);
+                                    }}
+                                    className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Copy className="w-3 h-3" /> কপি
+                                  </button>
+                                </div>
+                                <strong className="text-amber-300 font-mono text-sm tracking-wider">{req.accountNumber}</strong>
+                              </div>
+
+                              <div className="bg-[#08122c] px-3 py-1.5 rounded-xl border border-blue-900/50">
+                                <span className="text-slate-400 text-[10px] block">পেমেন্ট গেটওয়ে চ্যানেল:</span>
+                                <strong className="text-emerald-300 font-mono text-xs uppercase">{req.gateway} Personal</strong>
+                              </div>
+
+                              <div className="bg-[#08122c] px-3 py-1.5 rounded-xl border border-blue-900/50">
+                                <span className="text-slate-400 text-[10px] block">আবেদনের তারিখ ও সময়:</span>
+                                <span className="text-slate-300 text-xs font-mono">{req.formattedTime || req.createdAt}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {req.status === 'pending' ? (
+                            <div className="flex items-center gap-2 shrink-0 self-end lg:self-center">
+                              <button
+                                type="button"
+                                onClick={() => handleWithdrawalAction(req.id, 'approved')}
+                                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition-all shadow-lg active:scale-95 cursor-pointer flex items-center gap-1.5"
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span>অনুমোদন করুন (Success)</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleWithdrawalAction(req.id, 'rejected', 'অ্যাকাউন্ট তথ্য অসম্পূর্ণ')}
+                                className="px-3 py-2 rounded-xl bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white text-xs font-bold border border-rose-500/40 transition-all cursor-pointer flex items-center gap-1"
+                              >
+                                <XCircle className="w-4 h-4" />
+                                <span>বাতিল ও রিফান্ড</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-right shrink-0">
+                              <span className="text-xs font-mono font-bold text-slate-400">
+                                {req.status === 'approved' ? '✓ সফলভাবে প্রেরিত (Success)' : '✕ বাতিলকৃত ও ব্যালেন্স রিফান্ডেড'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
+          {/* ================= VIP SALARY & LEVEL SETTINGS ================= */}
+          {activeNav === 'vip' && (
+            <div className="space-y-4 animate-in fade-in">
+              <div className="bg-[#060e22] p-4 rounded-3xl border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    <Crown className="w-5 h-5 text-amber-400" />
+                    <span>VIP লেভেল প্রগ্রেস ও মাসিক বেতন কন্ট্রোল সেন্টার</span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    ১০০ টাকা বেটে ১ VIP কাউন্ট। এখান থেকে প্রতি VIP লেভেলের প্রয়োজনীয় বেট সংখ্যা, লেভেল আপ বোনাস এবং মাসিক বেতন (Monthly Salary) পরিবর্তন করুন।
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveVipSettings}
+                  className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-2 shrink-0"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                  <span>সব পরিবর্তন সেভ করুন</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {vipSettingsState.map((tier) => (
+                  <div
+                    key={tier.level}
+                    className="p-5 rounded-3xl bg-[#060e22] border border-blue-500/30 shadow-lg space-y-4 relative overflow-hidden"
+                  >
+                    <div className="flex items-center justify-between border-b border-blue-900/60 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-8 h-8 rounded-full bg-gradient-to-tr from-amber-500 to-yellow-300 text-slate-950 font-black flex items-center justify-center text-xs shadow-md">
+                          V{tier.level}
+                        </span>
+                        <div>
+                          <h4 className="text-sm font-black text-white">{tier.name}</h4>
+                          <span className="text-[10px] text-amber-400 font-mono">
+                            টার্নওভার: ৳{(tier.requiredBetCount * 100).toLocaleString('en-US')}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold font-mono px-2.5 py-1 rounded-xl bg-blue-950 border border-blue-500/30 text-sky-300">
+                        Level {tier.level}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <label className="text-[10px] text-slate-400 block mb-1">
+                          প্রয়োজনীয় বেট সংখ্যা (১০০৳ = ১ বেট)
+                        </label>
+                        <input
+                          type="number"
+                          value={tier.requiredBetCount}
+                          onChange={(e) =>
+                            handleUpdateVipTier(tier.level, 'requiredBetCount', Math.max(0, parseInt(e.target.value) || 0))
+                          }
+                          className="w-full px-3 py-2 rounded-xl bg-[#030919] border border-blue-500/30 text-white font-mono text-xs focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-amber-300 font-bold block mb-1">
+                          মাসিক বেতন (Monthly Salary ৳)
+                        </label>
+                        <input
+                          type="number"
+                          value={tier.monthlySalary}
+                          onChange={(e) =>
+                            handleUpdateVipTier(tier.level, 'monthlySalary', Math.max(0, parseInt(e.target.value) || 0))
+                          }
+                          className="w-full px-3 py-2 rounded-xl bg-[#030919] border border-amber-500/40 text-amber-300 font-mono font-bold text-xs focus:outline-none focus:border-amber-300"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-emerald-400 block mb-1">
+                          লেভেল আপ বোনাস (৳)
+                        </label>
+                        <input
+                          type="number"
+                          value={tier.upgradeBonus}
+                          onChange={(e) =>
+                            handleUpdateVipTier(tier.level, 'upgradeBonus', Math.max(0, parseInt(e.target.value) || 0))
+                          }
+                          className="w-full px-3 py-2 rounded-xl bg-[#030919] border border-emerald-500/30 text-emerald-400 font-mono text-xs focus:outline-none focus:border-emerald-300"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-slate-400 block mb-1">
+                          দৈনিক উইথড্র লিমিট (৳)
+                        </label>
+                        <input
+                          type="number"
+                          value={tier.maxWithdrawDaily}
+                          onChange={(e) =>
+                            handleUpdateVipTier(tier.level, 'maxWithdrawDaily', Math.max(0, parseInt(e.target.value) || 0))
+                          }
+                          className="w-full px-3 py-2 rounded-xl bg-[#030919] border border-blue-500/30 text-white font-mono text-xs focus:outline-none focus:border-sky-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={handleSaveVipSettings}
+                  className="px-6 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-2"
+                >
+                  <CheckCircle2 className="w-5 h-5 text-slate-950" />
+                  <span>সব VIP ও মাসিক বেতন সেটিংস সংরক্ষণ করুন</span>
+                </button>
               </div>
             </div>
           )}

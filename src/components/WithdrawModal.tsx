@@ -7,7 +7,7 @@ import { saveWithdrawalRequest, WithdrawalRequest } from '../utils/firebase';
 interface WithdrawModalProps {
   onClose: () => void;
   userBalance: number;
-  onUpdateBalance: (newBalance: number) => void;
+  onUpdateBalance: (newBalance: number, isBet?: boolean) => void;
   currency: Currency;
   userId?: string;
   username?: string;
@@ -76,7 +76,7 @@ export function WithdrawModal({
 
     setTimeout(() => {
       setIsSubmitting(false);
-      onUpdateBalance(userBalance - withdrawAmount);
+      onUpdateBalance(userBalance - withdrawAmount, false);
       setSuccess(true);
       sound.playWin();
     }, 1000);

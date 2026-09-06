@@ -101,6 +101,7 @@ export interface RegisteredMember {
   countryCode: string;
   balance: number;
   vipLevel: number;
+  vipExp?: number;
   invitationCode: string;
   gender?: 'all' | 'female' | 'male';
   registeredAt: string;
@@ -168,6 +169,27 @@ export interface FirstDepositBonusConfig {
   bannerImage?: string;
 }
 
+export interface VipTierConfig {
+  level: number;
+  name: string;
+  requiredDeposit: number;
+  requiredBetCount: number; // 100 BDT = 1 bet
+  upgradeBonus: number;
+  monthlySalary: number;
+  maxWithdrawDaily?: number;
+}
+
+export const DEFAULT_VIP_SETTINGS: VipTierConfig[] = [
+  { level: 1, name: 'VIP 1 ব্রোঞ্জ মেম্বার', requiredDeposit: 100, requiredBetCount: 1000, upgradeBonus: 60, monthlySalary: 500, maxWithdrawDaily: 25000 },
+  { level: 2, name: 'VIP 2 সিলভার মেম্বার', requiredDeposit: 500, requiredBetCount: 3000, upgradeBonus: 180, monthlySalary: 1200, maxWithdrawDaily: 50000 },
+  { level: 3, name: 'VIP 3 গোল্ড মেম্বার', requiredDeposit: 2000, requiredBetCount: 8000, upgradeBonus: 680, monthlySalary: 3000, maxWithdrawDaily: 100000 },
+  { level: 4, name: 'VIP 4 প্লাটিনাম মেম্বার', requiredDeposit: 5000, requiredBetCount: 20000, upgradeBonus: 1880, monthlySalary: 8000, maxWithdrawDaily: 250000 },
+  { level: 5, name: 'VIP 5 ডায়মন্ড মেম্বার', requiredDeposit: 15000, requiredBetCount: 50000, upgradeBonus: 5880, monthlySalary: 20000, maxWithdrawDaily: 500000 },
+  { level: 6, name: 'VIP 6 মাস্টার মেম্বার', requiredDeposit: 50000, requiredBetCount: 150000, upgradeBonus: 18880, monthlySalary: 50000, maxWithdrawDaily: 1000000 },
+  { level: 7, name: 'VIP 7 ক্রাউন মেম্বার', requiredDeposit: 150000, requiredBetCount: 500000, upgradeBonus: 58880, monthlySalary: 120000, maxWithdrawDaily: 2500000 },
+  { level: 8, name: 'VIP 8 লিজেন্ড মেম্বার', requiredDeposit: 500000, requiredBetCount: 1500000, upgradeBonus: 188880, monthlySalary: 300000, maxWithdrawDaily: 5000000 },
+];
+
 export interface SystemConfig {
   gameStatuses: Record<string, 'active' | 'coming_soon' | 'maintenance'>;
   gateways: Record<string, GatewayConfig>;
@@ -178,6 +200,7 @@ export interface SystemConfig {
   maintenanceMode?: boolean;
   firstDepositBonus?: FirstDepositBonusConfig;
   appDownloadUrl?: string;
+  vipSettings?: VipTierConfig[];
 }
 
 // Initial Default Values
@@ -281,6 +304,7 @@ export function getLocalConfig(): SystemConfig {
       return {
         ...parsed,
         firstDepositBonus: parsed.firstDepositBonus || DEFAULT_FIRST_DEPOSIT_BONUS,
+        vipSettings: parsed.vipSettings || DEFAULT_VIP_SETTINGS,
       };
     }
   } catch (e) {
@@ -301,6 +325,7 @@ export function getLocalConfig(): SystemConfig {
     giftCodes: [], // Currently NO active gift codes as requested
     firstDepositBonus: DEFAULT_FIRST_DEPOSIT_BONUS,
     appDownloadUrl: 'https://millionaire-bd.web.app/download/app-v2.apk',
+    vipSettings: DEFAULT_VIP_SETTINGS,
   };
 }
 
