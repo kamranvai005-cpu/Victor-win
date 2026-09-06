@@ -16,6 +16,17 @@ import { Currency, UserProfile } from '../types';
 import { getCurrencySymbol } from '../utils/currency';
 import { sound } from '../utils/audio';
 import { getLocalConfig, updateSystemConfig } from '../utils/firebase';
+import {
+  DAILY_CHECKIN_DAYS,
+  getCheckInState,
+  saveCheckInState,
+  getTodayDepositAmount,
+  getTodayDateString,
+  SPIN_COST,
+  LOW_REWARD_SPIN_PRIZES,
+  selectRandomSpinPrize,
+  CheckInState,
+} from '../utils/checkin';
 
 interface ActivityViewProps {
   user: UserProfile;
@@ -34,23 +45,30 @@ export function ActivityView({
 }: ActivityViewProps) {
   const sym = getCurrencySymbol(currency);
 
-  // Requirement Modal State (Minimum 1000 deposit to claim activity rewards)
-  const [showMinDepositNotice, setShowMinDepositNotice] = useState(false);
+  // Requirement Modal State for Check-in Deposit Requirement
+  const [showCheckInDepositNotice, setShowCheckInDepositNotice] = useState(false);
 
   // Daily Check-in state
-  const [checkedDays, setCheckedDays] = useState<number[]>([]);
-  const [todayChecked, setTodayChecked] = useState(false);
+  const [checkInState, setCheckInState] = useState<CheckInState>(() => getCheckInState(user.id || user.username));
+  const todayStr = getTodayDateString();
+  const todayChecked = checkInState.lastClaimDate === todayStr;
+  const isCycleCompleted = checkInState.isCycleCompleted || checkInState.currentDay > 7;
+  const currentDayNum = Math.min(7, checkInState.currentDay);
+  const currentDayConfig = DAILY_CHECKIN_DAYS.find((d) => d.day === currentDayNum) || DAILY_CHECKIN_DAYS[0];
+
+  const todayDeposit = getTodayDepositAmount(user.id || user.username);
+  const isDepositMet = todayDeposit >= currentDayConfig.requiredDeposit;
 
   // Gift code state
   const [giftCode, setGiftCode] = useState('');
   const [giftCodeSuccess, setGiftCodeSuccess] = useState<string | null>(null);
   const [giftCodeError, setGiftCodeError] = useState<string | null>(null);
 
-  // Lucky Spin Wheel state
+  // Lucky Spin Wheel state - STRICT: 20 BDT per spin, NO free spins, low realistic rewards
   const [isSpinning, setIsSpinning] = useState(false);
   const [wheelRotation, setWheelRotation] = useState(0);
   const [wheelPrize, setWheelPrize] = useState<string | null>(null);
-  const [availableSpins, setAvailableSpins] = useState(1);
+  const [spinError, setSpinError] = useState<string | null>(null);
 
   // Real-time Super Jackpot Rolling Counter
   const [jackpotAmount, setJackpotAmount] = useState(5849320.75);
@@ -62,32 +80,42 @@ export function ActivityView({
     return () => clearInterval(interval);
   }, []);
 
-  const checkInRewards = [
-    { day: 1, amount: 18, isClaimed: checkedDays.includes(1), isToday: !todayChecked && checkedDays.length === 0, icon: '🌟' },
-    { day: 2, amount: 28, isClaimed: checkedDays.includes(2), icon: '💎' },
-    { day: 3, amount: 58, isClaimed: checkedDays.includes(3), icon: '🎁' },
-    { day: 4, amount: 88, isClaimed: checkedDays.includes(4), icon: '🔥' },
-    { day: 5, amount: 128, isClaimed: checkedDays.includes(5), icon: '⚡' },
-    { day: 6, amount: 188, isClaimed: checkedDays.includes(6), icon: '👑' },
-    { day: 7, amount: 588, isClaimed: checkedDays.includes(7), isSuper: true, icon: '🏆' },
-  ];
-
   const handleClaimCheckIn = () => {
-    if (todayChecked) return;
-
-    // Strict Rule: Claiming requires daily minimum 1000 deposit / project balance
-    if (user.balance < 1000) {
+    if (isCycleCompleted) {
       sound.playClick();
-      setShowMinDepositNotice(true);
+      return;
+    }
+
+    if (todayChecked) {
+      sound.playClick();
+      return;
+    }
+
+    // User must deposit that day's required amount (Day 1: 100, Day 2: 200, ..., Day 7: 700)
+    if (!isDepositMet) {
+      sound.playClick();
+      setShowCheckInDepositNotice(true);
       return;
     }
 
     sound.playWin();
     confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-    setTodayChecked(true);
-    setCheckedDays((prev) => [...prev, 1]);
-    const bonus = 18;
-    onUpdateBalance(user.balance + bonus);
+
+    const reward = currentDayConfig.reward;
+    const nextDay = checkInState.currentDay + 1;
+    const nextClaimed = [...checkInState.claimedDays, currentDayNum];
+    const newCycleCompleted = nextDay > 7;
+
+    const newState: CheckInState = {
+      currentDay: nextDay,
+      claimedDays: nextClaimed,
+      lastClaimDate: todayStr,
+      isCycleCompleted: newCycleCompleted,
+    };
+
+    setCheckInState(newState);
+    saveCheckInState(newState, user.id || user.username);
+    onUpdateBalance(user.balance + reward);
   };
 
   const handleRedeemCode = (e: React.FormEvent) => {
@@ -165,46 +193,42 @@ export function ActivityView({
     setGiftCode('');
   };
 
-  const wheelPrizes = [
-    { label: '৳88', value: 88, color: '#f59e0b' },
-    { label: '৳188', value: 188, color: '#3b82f6' },
-    { label: '৳58', value: 58, color: '#10b981' },
-    { label: '৳888', value: 888, color: '#ec4899' },
-    { label: '৳28', value: 28, color: '#8b5cf6' },
-    { label: '৳1888', value: 1888, color: '#eab308' },
-    { label: '৳588', value: 588, color: '#06b6d4' },
-    { label: '৳3888', value: 3888, color: '#ef4444' },
-  ];
-
   const handleSpinWheel = () => {
-    if (isSpinning || availableSpins <= 0) return;
+    if (isSpinning) return;
+    setSpinError(null);
+    setWheelPrize(null);
 
-    // Strict Rule: Spin wheel and task claims require minimum 1000 deposit/project
-    if (user.balance < 1000) {
+    // User requirement: Spin costs 20 BDT, no free spin
+    if (user.balance < SPIN_COST) {
       sound.playClick();
-      setShowMinDepositNotice(true);
+      setSpinError(`অপর্যাপ্ত ব্যালেন্স! ১টি স্পিন কিনতে ওয়ালেটে কমপক্ষে ৳${SPIN_COST} থাকতে হবে।`);
       return;
     }
 
-    setIsSpinning(true);
-    setWheelPrize(null);
+    // Deduct 20 BDT immediately to buy the spin
     sound.playClick();
+    setIsSpinning(true);
+    const balanceAfterCost = user.balance - SPIN_COST;
+    onUpdateBalance(balanceAfterCost);
 
-    const prizeIndex = Math.floor(Math.random() * wheelPrizes.length);
-    const selected = wheelPrizes[prizeIndex];
-
-    const sliceDeg = 360 / wheelPrizes.length;
-    const targetDeg = 360 * 5 + (360 - prizeIndex * sliceDeg - sliceDeg / 2);
+    const { prize, index } = selectRandomSpinPrize();
+    const sliceDeg = 360 / LOW_REWARD_SPIN_PRIZES.length;
+    // Target rotation to land the top pointer precisely on the winning prize slice
+    const targetDeg = 360 * 5 + (360 - index * sliceDeg - sliceDeg / 2);
 
     setWheelRotation((prev) => prev + targetDeg);
 
+    const tickInterval = setInterval(() => {
+      sound.playSpinTick();
+    }, 140);
+
     setTimeout(() => {
+      clearInterval(tickInterval);
       setIsSpinning(false);
-      setAvailableSpins((prev) => prev - 1);
-      setWheelPrize(`${sym}${selected.value}`);
+      setWheelPrize(`+${sym}${prize.value}`);
       sound.playWin();
-      confetti({ particleCount: 90, spread: 75, origin: { y: 0.6 } });
-      onUpdateBalance(user.balance + selected.value);
+      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      onUpdateBalance(balanceAfterCost + prize.value);
     }, 4000);
   };
 
@@ -256,16 +280,16 @@ export function ActivityView({
         >
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 uppercase tracking-wider">
-              ATTENDANCE
+              DAILY ATTENDANCE
             </span>
             <span className="text-3xl animate-bounce">🎁</span>
           </div>
           <div>
             <h3 className="text-base sm:text-lg font-black text-white mt-2">
-              ৭ দিনের ধারাবাহিক হাজিরা বোনাস
+              ৭ দিনের ডিপোজিট চেক-ইন বোনাস
             </h3>
             <p className="text-xs text-amber-300 font-semibold mt-0.5">
-              প্রতিদিন চেক-ইন করে জিতে নিন সর্বমোট {sym}588 বোনাস
+              প্রতিদিন নির্দিষ্ট ডিপোজিট সম্পন্ন করে জিতে নিন মোট {sym}২৮০ রিওয়ার্ড (১ম দিন: {sym}১০ থেকে ৭ম দিন: {sym}৭০)
             </p>
           </div>
         </div>
@@ -301,71 +325,155 @@ export function ActivityView({
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white font-display">
-                ৭-দিনের চেক-ইন রিওয়ার্ড গ্রিড
+                ৭-দিনের ডিপোজিট চেক-ইন গ্রিড
               </h3>
               <p className="text-[11px] text-slate-300">
-                ধারাবাহিক চেক-ইনে প্রতিদিন বড় অঙ্কের রিওয়ার্ড
+                প্রতিদিন ডিপোজিট করে ধারাবাহিকভাবে ৭ দিন পর্যন্ত বোনাস ক্লেইম করুন (সর্বোচ্চ ৭ দিন)
               </p>
             </div>
           </div>
           <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-500/20 px-2.5 py-1 rounded-full border border-emerald-500/40">
-            স্ট্রিক: {todayChecked ? 3 : 2} দিন
+            {isCycleCompleted
+              ? 'সাইকেল সমাপ্ত'
+              : `দিন ${currentDayNum}/৭`}
           </span>
         </div>
 
-        {/* 7 Days Grid with official number badges */}
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 sm:gap-2.5">
-          {checkInRewards.map((item) => (
-            <div
-              key={item.day}
-              className={`p-2.5 rounded-2xl border text-center flex flex-col items-center justify-between transition-all relative overflow-hidden ${
-                item.isClaimed
-                  ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
-                  : item.isToday && !todayChecked
-                  ? 'bg-amber-950/60 border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.4)] animate-pulse text-amber-200'
-                  : item.isSuper
-                  ? 'bg-gradient-to-b from-indigo-950 to-[#0e1d44] border-indigo-500/50 text-indigo-200 col-span-2 sm:col-span-1'
-                  : 'bg-[#060e22] border-blue-500/20 text-slate-400'
-              }`}
-            >
-              {/* Day Badge Icon */}
-              <div className="text-base my-0.5">
-                {item.icon}
-              </div>
+        {/* 7 Days Grid with progressive deposit requirement and reward */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+          {DAILY_CHECKIN_DAYS.map((item) => {
+            const isClaimed = checkInState.claimedDays.includes(item.day);
+            const isCurrent = !isCycleCompleted && checkInState.currentDay === item.day;
+            const isSuper = item.day === 7;
 
-              <div className="my-1 font-black text-xs font-mono text-white flex items-center gap-0.5">
-                <span>+{sym}{item.amount}</span>
-              </div>
+            return (
+              <div
+                key={item.day}
+                className={`p-3 rounded-2xl border text-center flex flex-col items-center justify-between transition-all relative overflow-hidden ${
+                  isClaimed
+                    ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+                    : isCurrent && !todayChecked
+                    ? 'bg-amber-950/60 border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.4)] ring-2 ring-amber-400/40 text-amber-200'
+                    : isSuper
+                    ? 'bg-gradient-to-b from-indigo-950 to-[#0e1d44] border-indigo-500/40 text-indigo-200'
+                    : 'bg-[#060e22] border-blue-500/20 text-slate-400'
+                }`}
+              >
+                <div className="flex items-center justify-between w-full text-[10px] font-bold text-slate-400">
+                  <span>{item.day}-ম দিন</span>
+                  <span className="text-amber-400/80 font-mono">ডিপোজিট ৳{item.requiredDeposit}</span>
+                </div>
 
-              {item.isClaimed ? (
-                <span className="flex items-center gap-0.5 text-[9px] text-emerald-400 font-bold">
-                  <CheckCircle2 className="w-3 h-3" /> সম্পন্ন
-                </span>
-              ) : item.isToday ? (
-                <span className="text-[9px] text-amber-400 font-bold animate-bounce">আজকের</span>
-              ) : (
-                <span className="flex items-center gap-0.5 text-[9px] text-slate-500">
-                  🔒 লকড
-                </span>
-              )}
-            </div>
-          ))}
+                {/* Day Icon */}
+                <div className="text-2xl my-1.5">
+                  {item.icon}
+                </div>
+
+                {/* Reward Amount */}
+                <div className="my-1 font-black text-sm font-mono text-white flex items-center gap-0.5">
+                  <span className="text-amber-300">+{sym}{item.reward}</span>
+                </div>
+
+                {/* Status Indicator */}
+                {isClaimed ? (
+                  <span className="flex items-center gap-0.5 text-[10px] text-emerald-400 font-bold">
+                    <CheckCircle2 className="w-3 h-3" /> সম্পন্ন
+                  </span>
+                ) : isCurrent ? (
+                  <span className="text-[10px] text-amber-400 font-bold">
+                    {todayChecked ? 'আজকের শেষ' : 'আজকের দিন'}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-0.5 text-[10px] text-slate-500">
+                    🔒 লকড
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
 
-        {/* CTA Check-In Button */}
-        <button
-          type="button"
-          onClick={handleClaimCheckIn}
-          disabled={todayChecked}
-          className={`w-full py-3 rounded-2xl font-black text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 transition-all ${
-            todayChecked
-              ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700'
-              : 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600 hover:brightness-110 text-slate-950 shadow-amber-900/40 cursor-pointer active:scale-98'
-          }`}
-        >
-          <Sparkles className="w-4 h-4" />
-          <span>{todayChecked ? 'আজকের বোনাস গ্রহণ সম্পন্ন (+৳58)' : '৩য় দিনের এটেন্ডেন্স বোনাস নিন (+৳58)'}</span>
-        </button>
+        {/* Today's Deposit Progress Panel */}
+        {!isCycleCompleted ? (
+          <div className="p-3.5 rounded-2xl bg-[#060e22] border border-blue-500/30 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-1">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-white">আজকের টার্গেট ({currentDayConfig.day}-ম দিন):</span>
+                <span className="text-amber-300 font-mono font-bold">
+                  প্রয়োজনীয় ডিপোজিট {sym}{currentDayConfig.requiredDeposit} ➔ বোনাস {sym}{currentDayConfig.reward}
+                </span>
+              </div>
+              <span className="font-mono text-[11px] text-slate-300">
+                আজকের ডিপোজিট: <strong className={isDepositMet ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{sym}{todayDeposit}</strong> / {sym}{currentDayConfig.requiredDeposit}
+              </span>
+            </div>
+
+            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-500 ${
+                  isDepositMet
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                    : 'bg-gradient-to-r from-amber-500 to-yellow-400'
+                }`}
+                style={{ width: `${Math.min(100, (todayDeposit / currentDayConfig.requiredDeposit) * 100)}%` }}
+              />
+            </div>
+
+            {!isDepositMet && !todayChecked && (
+              <p className="text-[11px] text-amber-400/90 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  {currentDayConfig.day}-ম দিনের চেক-ইন বোনাস (+{sym}{currentDayConfig.reward}) আনলক করতে আজ আরও <strong className="text-amber-300 font-mono">{sym}{Math.max(0, currentDayConfig.requiredDeposit - todayDeposit)}</strong> ডিপোজিট প্রয়োজন।
+                </span>
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="p-3.5 rounded-2xl bg-amber-950/40 border border-amber-500/40 text-center text-xs text-amber-200 font-semibold">
+            🎉 আপনার ৭ দিনের চেক-ইন সাইকেল সফলভাবে সম্পন্ন হয়েছে! নিয়ম অনুযায়ী ৭ দিন পূর্ণ হওয়ার পর আর কোনো চেক-ইন বোনাস প্রযোজ্য নয়।
+          </div>
+        )}
+
+        {/* CTA Check-In / Deposit Button */}
+        {isCycleCompleted ? (
+          <button
+            type="button"
+            disabled
+            className="w-full py-3 rounded-2xl font-black text-xs sm:text-sm bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700 flex items-center justify-center gap-2"
+          >
+            <span>৭ দিনের চেক-ইন সাইকেল সম্পন্ন (অফার সমাপ্ত)</span>
+          </button>
+        ) : todayChecked ? (
+          <button
+            type="button"
+            disabled
+            className="w-full py-3 rounded-2xl font-black text-xs sm:text-sm bg-emerald-950/60 text-emerald-300 cursor-not-allowed border border-emerald-500/40 flex items-center justify-center gap-2"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>আজকের ({currentDayConfig.day}-ম দিন) বোনাস গ্রহণ সম্পন্ন (+{sym}{currentDayConfig.reward}) — আগামীকাল পরবর্তী দিন আনলক হবে</span>
+          </button>
+        ) : !isDepositMet ? (
+          <button
+            type="button"
+            onClick={() => {
+              sound.playClick();
+              onOpenDeposit();
+            }}
+            className="w-full py-3 rounded-2xl font-black text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 transition-all bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600 hover:brightness-110 text-slate-950 shadow-amber-900/40 cursor-pointer active:scale-98"
+          >
+            <Wallet className="w-4 h-4" />
+            <span>আজকের প্রয়োজনীয় {sym}{Math.max(0, currentDayConfig.requiredDeposit - todayDeposit)} ডিপোজিট করুন</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleClaimCheckIn}
+            className="w-full py-3 rounded-2xl font-black text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 transition-all bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600 hover:brightness-110 text-slate-950 shadow-emerald-900/40 cursor-pointer active:scale-98 animate-pulse"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>🎉 {currentDayConfig.day}-ম দিনের চেক-ইন বোনাস গ্রহণ করুন (+{sym}{currentDayConfig.reward})</span>
+          </button>
+        )}
       </div>
 
       {/* Super Jackpot & Betting Rebate Section */}
@@ -466,13 +574,18 @@ export function ActivityView({
                   লাকি ফরচুন স্পিন হুইল
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  স্পিন করে জিতে নিন সর্বোচ্চ {sym}3,888 ক্যাশ
+                  প্রতি স্পিন {sym}{SPIN_COST} | রিওয়ার্ড {sym}২ থেকে {sym}২০ পর্যন্ত
                 </p>
               </div>
             </div>
-            <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/30">
-              {availableSpins} স্পিন বাকি
-            </span>
+            <div className="flex flex-col items-end">
+              <span className="text-[10px] uppercase font-black tracking-wider text-amber-300 bg-amber-500/20 px-2.5 py-0.5 rounded-full border border-amber-500/30">
+                নো ফ্রি স্পিন
+              </span>
+              <span className="text-[11px] text-slate-300 font-mono mt-0.5">
+                মূল্য: {sym}{SPIN_COST}/স্পিন
+              </span>
+            </div>
           </div>
 
           {/* Wheel Visual */}
@@ -486,8 +599,8 @@ export function ActivityView({
               }}
               className="w-48 h-48 sm:w-56 sm:h-56 rounded-full border-4 border-amber-500/60 shadow-[0_0_30px_rgba(245,158,11,0.3)] relative overflow-hidden bg-[#0e1d44]"
             >
-              {wheelPrizes.map((p, idx) => {
-                const angle = (360 / wheelPrizes.length) * idx;
+              {LOW_REWARD_SPIN_PRIZES.map((p, idx) => {
+                const angle = (360 / LOW_REWARD_SPIN_PRIZES.length) * idx;
                 return (
                   <div
                     key={idx}
@@ -518,21 +631,38 @@ export function ActivityView({
                 🎉 অভিনন্দন! {wheelPrize} ক্যাশ আপনার একাউন্টে যোগ হয়েছে!
               </p>
             )}
+
+            {spinError && (
+              <p className="text-xs font-bold text-rose-400 mt-2 text-center">
+                ⚠️ {spinError}
+              </p>
+            )}
           </div>
 
-          <button
-            type="button"
-            onClick={handleSpinWheel}
-            disabled={isSpinning || availableSpins <= 0}
-            className={`w-full py-3 rounded-2xl font-black text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 transition-all ${
-              availableSpins <= 0
-                ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                : 'bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-500 hover:brightness-110 text-white shadow-purple-900/50 cursor-pointer active:scale-98'
-            }`}
-          >
-            <Zap className="w-4 h-4" />
-            <span>{isSpinning ? 'স্পিন হচ্ছে...' : `লাকি স্পিন করুন (${availableSpins} বাকি)`}</span>
-          </button>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={handleSpinWheel}
+              disabled={isSpinning}
+              className={`w-full py-3 rounded-2xl font-black text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                user.balance < SPIN_COST
+                  ? 'bg-gradient-to-r from-amber-600/80 to-yellow-600/80 hover:brightness-110 text-white border border-amber-500/50 active:scale-98'
+                  : 'bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-500 hover:brightness-110 text-white shadow-purple-900/50 active:scale-98'
+              }`}
+            >
+              <Zap className="w-4 h-4" />
+              <span>
+                {isSpinning
+                  ? 'স্পিন হচ্ছে...'
+                  : user.balance < SPIN_COST
+                  ? `২০ টাকায় স্পিন কিনুন (ব্যালেন্স অপর্যাপ্ত)`
+                  : `২০ টাকায় স্পিন করুন (${sym}${SPIN_COST} কাটা হবে)`}
+              </span>
+            </button>
+            <p className="text-[10px] text-center text-slate-400">
+              * ফ্রিতে কোনো স্পিন নেই। প্রতি স্পিনে ওয়ালেট থেকে {sym}{SPIN_COST} কাটা হবে। সম্ভাব্য রিওয়ার্ড: {sym}২, {sym}৫, {sym}১০, {sym}১৫ ও সর্বোচ্চ {sym}২০।
+            </p>
+          </div>
         </div>
 
         {/* Gift Code Redeem Banner Card */}
@@ -587,13 +717,13 @@ export function ActivityView({
         </div>
       </div>
 
-      {/* Minimum 1000 Deposit Requirement Notice Modal */}
-      {showMinDepositNotice && (
+      {/* Check-In Progressive Deposit Requirement Notice Modal */}
+      {showCheckInDepositNotice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in">
           <div className="relative w-full max-w-sm rounded-3xl bg-[#091533] border-2 border-amber-500/60 p-6 shadow-2xl text-center space-y-4">
             <button
               type="button"
-              onClick={() => setShowMinDepositNotice(false)}
+              onClick={() => setShowCheckInDepositNotice(false)}
               className="absolute top-4 right-4 w-7 h-7 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
             >
               <X className="w-4 h-4" />
@@ -608,8 +738,24 @@ export function ActivityView({
                 ডিপোজিট শর্ত প্রযোজ্য
               </h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                প্রতিদিনের এটেন্ডেন্স, লাকি স্পিন ও একটিভিটি রিওয়ার্ড ক্লেইম করতে হলে প্রতিদিন সর্বনিম্ন <span className="text-amber-400 font-bold font-mono">১,০০০</span> রিচার্জ / প্রজেক্ট সম্পন্ন থাকা বাধ্যতামূলক।
+                <strong className="text-amber-300">{currentDayConfig.day}-ম দিনের</strong> হাজিরা বোনাস (+{sym}{currentDayConfig.reward}) ক্লেইম করতে আজ কমপক্ষে <strong className="text-amber-400">{sym}{currentDayConfig.requiredDeposit}</strong> ডিপোজিট করতে হবে।
               </p>
+            </div>
+
+            {/* Target Breakdown Box */}
+            <div className="p-3 rounded-2xl bg-[#060e22] border border-blue-500/30 text-xs space-y-1.5 text-left">
+              <div className="flex justify-between text-slate-300">
+                <span>আজকের প্রয়োজনীয় ডিপোজিট:</span>
+                <span className="font-mono font-bold text-white">{sym}{currentDayConfig.requiredDeposit}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span>আজ জমা হয়েছে:</span>
+                <span className="font-mono font-bold text-emerald-400">{sym}{todayDeposit}</span>
+              </div>
+              <div className="flex justify-between border-t border-blue-900/60 pt-1.5 font-bold">
+                <span className="text-amber-300">আর বাকি প্রয়োজন:</span>
+                <span className="font-mono text-amber-400 font-black">{sym}{Math.max(0, currentDayConfig.requiredDeposit - todayDeposit)}</span>
+              </div>
             </div>
 
             <div className="pt-2 space-y-2">
@@ -617,18 +763,18 @@ export function ActivityView({
                 type="button"
                 onClick={() => {
                   sound.playClick();
-                  setShowMinDepositNotice(false);
+                  setShowCheckInDepositNotice(false);
                   onOpenDeposit();
                 }}
                 className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:brightness-110 text-slate-950 font-black text-xs sm:text-sm shadow-xl shadow-amber-950/50 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
               >
                 <Wallet className="w-4 h-4" />
-                <span>এখনই ১০০০ ডিপোজিট করুন</span>
+                <span>এখনই {sym}{Math.max(0, currentDayConfig.requiredDeposit - todayDeposit)} ডিপোজিট করুন</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => setShowMinDepositNotice(false)}
+                onClick={() => setShowCheckInDepositNotice(false)}
                 className="w-full py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white text-xs font-semibold cursor-pointer"
               >
                 পরে করব

@@ -17,6 +17,7 @@ import confetti from 'canvas-confetti';
 import { Currency } from '../types';
 import { sound } from '../utils/audio';
 import { getLocalConfig, saveDepositRequest, GatewayConfig } from '../utils/firebase';
+import { addTodayDepositAmount } from '../utils/checkin';
 
 interface DepositModalProps {
   onClose: () => void;
@@ -206,6 +207,7 @@ export function DepositModal({
       formattedTime: new Date().toLocaleTimeString(),
     };
     saveDepositRequest(newDepositRecord);
+    addTodayDepositAmount(finalDepositAmount, userId || username);
 
     // After brief verification delay, show Pending Awaiting Admin Verification screen (NO auto-credit)
     setTimeout(() => {

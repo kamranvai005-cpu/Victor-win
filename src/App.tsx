@@ -994,6 +994,7 @@ export default function App() {
           onClose={() => setShowVip(false)}
           currency={currency}
           onUpdateBalance={handleUpdateBalance}
+          onOpenDeposit={handleOpenDepositFlow}
         />
       )}
 

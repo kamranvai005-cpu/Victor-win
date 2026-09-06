@@ -1,16 +1,28 @@
 import { useState } from 'react';
-import { Crown, Sparkles, X, Zap, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Crown, Sparkles, X, Zap, ArrowRight, CheckCircle2, AlertTriangle, Wallet } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { UserProfile, Currency } from '../types';
 import { VIP_TIERS } from '../data/mockData';
 import { getLocalConfig, DEFAULT_VIP_SETTINGS, VipTierConfig } from '../utils/firebase';
 import { sound } from '../utils/audio';
+import {
+  DAILY_CHECKIN_DAYS,
+  getCheckInState,
+  saveCheckInState,
+  getTodayDepositAmount,
+  getTodayDateString,
+  SPIN_COST,
+  LOW_REWARD_SPIN_PRIZES,
+  selectRandomSpinPrize,
+  CheckInState,
+} from '../utils/checkin';
 
 interface VipActivityModalProps {
   user: UserProfile;
   onClose: () => void;
   currency: Currency;
   onUpdateBalance: (newBalance: number) => void;
+  onOpenDeposit?: () => void;
 }
 
 export function VipActivityModal({
@@ -18,11 +30,26 @@ export function VipActivityModal({
   onClose,
   currency,
   onUpdateBalance,
+  onOpenDeposit,
 }: VipActivityModalProps) {
   const [activeTab, setActiveTab] = useState<'vip' | 'attendance' | 'wheel'>('vip');
-  const [claimedDays, setClaimedDays] = useState<number[]>([1, 2]);
+  
+  // Daily checkin synced state
+  const [checkInState, setCheckInState] = useState<CheckInState>(() => getCheckInState(user.id || user.username));
+  const todayStr = getTodayDateString();
+  const todayChecked = checkInState.lastClaimDate === todayStr;
+  const isCycleCompleted = checkInState.isCycleCompleted || checkInState.currentDay > 7;
+  const currentDayNum = Math.min(7, checkInState.currentDay);
+  const currentDayConfig = DAILY_CHECKIN_DAYS.find((d) => d.day === currentDayNum) || DAILY_CHECKIN_DAYS[0];
+
+  const todayDeposit = getTodayDepositAmount(user.id || user.username);
+  const isDepositMet = todayDeposit >= currentDayConfig.requiredDeposit;
+  const [attendanceNotice, setAttendanceNotice] = useState<string | null>(null);
+
+  // Lucky spin state (20 BDT cost, no free spin, low reward)
   const [wheelSpinning, setWheelSpinning] = useState<boolean>(false);
   const [wheelResult, setWheelResult] = useState<number | null>(null);
+  const [wheelError, setWheelError] = useState<string | null>(null);
 
   const sysConfig = getLocalConfig();
   const vipTiers = (sysConfig.vipSettings && sysConfig.vipSettings.length > 0)
@@ -32,43 +59,80 @@ export function VipActivityModal({
 
   const getSymbol = (c: Currency) => (c === 'BDT' ? '৳' : c === 'INR' ? '₹' : '$');
 
-  const attendanceDays = [
-    { day: 1, reward: 50, label: '১ম দিন', icon: '🪙' },
-    { day: 2, reward: 80, label: '২য় দিন', icon: '💰' },
-    { day: 3, reward: 120, label: '৩য় দিন', icon: '🎁' },
-    { day: 4, reward: 200, label: '৪র্থ দিন', icon: '💎' },
-    { day: 5, reward: 300, label: '৫ম দিন', icon: '🏆' },
-    { day: 6, reward: 500, label: '৬ষ্ঠ দিন', icon: '👑' },
-    { day: 7, reward: 1000, label: '৭ম দিন', icon: '🌟' },
-  ];
+  const handleClaimDay = (day: number, reward: number, requiredDeposit: number) => {
+    if (isCycleCompleted) {
+      setAttendanceNotice('৭ দিনের চেক-ইন সাইকেল ইতিমধ্যে সম্পন্ন হয়েছে!');
+      return;
+    }
 
-  const handleClaimDay = (day: number, reward: number) => {
-    if (claimedDays.includes(day)) return;
+    if (todayChecked) {
+      setAttendanceNotice('আজকের চেক-ইন ইতিমধ্যে গ্রহণ করা হয়েছে। আগামীকাল পরবর্তী দিন আনলক হবে।');
+      return;
+    }
+
+    if (day !== currentDayNum) {
+      setAttendanceNotice(`অনুগ্রহ করে ধারাবাহিক অনুযায়ী ${currentDayNum}-ম দিনের চেক-ইন করুন।`);
+      return;
+    }
+
+    if (todayDeposit < requiredDeposit) {
+      sound.playClick();
+      setAttendanceNotice(
+        `${day}-ম দিনের বোনাস পেতে আজ কমপক্ষে ${getSymbol(currency)}${requiredDeposit} ডিপোজিট প্রয়োজন। (আজ জমা হয়েছে: ${getSymbol(currency)}${todayDeposit})`
+      );
+      return;
+    }
 
     sound.playWin();
     confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
-    setClaimedDays([...claimedDays, day]);
+    
+    const nextDay = checkInState.currentDay + 1;
+    const nextClaimed = [...checkInState.claimedDays, day];
+    const newCycleCompleted = nextDay > 7;
+
+    const newState: CheckInState = {
+      currentDay: nextDay,
+      claimedDays: nextClaimed,
+      lastClaimDate: todayStr,
+      isCycleCompleted: newCycleCompleted,
+    };
+
+    setCheckInState(newState);
+    saveCheckInState(newState, user.id || user.username);
     onUpdateBalance(user.balance + reward);
+    setAttendanceNotice(null);
   };
 
   const handleSpinWheel = () => {
     if (wheelSpinning) return;
-    setWheelSpinning(true);
+    setWheelError(null);
     setWheelResult(null);
+
+    // Rule: Spin costs 20 BDT, no free spin
+    if (user.balance < SPIN_COST) {
+      sound.playClick();
+      setWheelError(`অপর্যাপ্ত ব্যালেন্স! স্পিন করতে ওয়ালেটে কমপক্ষে ${getSymbol(currency)}${SPIN_COST} প্রয়োজন।`);
+      return;
+    }
+
+    // Deduct 20 BDT immediately
+    sound.playClick();
+    setWheelSpinning(true);
+    const balanceAfterCost = user.balance - SPIN_COST;
+    onUpdateBalance(balanceAfterCost);
 
     const tickInterval = setInterval(() => sound.playSpinTick(), 100);
 
     setTimeout(() => {
       clearInterval(tickInterval);
-      const prizes = [100, 200, 500, 1000, 2000, 5000];
-      const win = prizes[Math.floor(Math.random() * prizes.length)];
-      setWheelResult(win);
+      const { prize } = selectRandomSpinPrize();
+      setWheelResult(prize.value);
       setWheelSpinning(false);
 
       sound.playWin();
       confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 } });
-      onUpdateBalance(user.balance + win);
-    }, 1800);
+      onUpdateBalance(balanceAfterCost + prize.value);
+    }, 2200);
   };
 
   return (
@@ -302,85 +366,204 @@ export function VipActivityModal({
 
         {/* Tab 2: 7-Day Attendance Check-in */}
         {activeTab === 'attendance' && (
-          <div className="space-y-3 animate-in fade-in">
-            <p className="text-xs text-slate-300">
-              প্রতিদিন চেক-ইন করে বোনাস ক্রেডিট গ্রহণ করুন! সম্পূর্ণ ৭ দিন পূরণ করলে পাবেন {getSymbol(currency)}1,000 এর স্পেশাল ক্যাশ বোনাস।
-            </p>
+          <div className="space-y-3.5 animate-in fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-2xl bg-[#060e22] border border-blue-500/30">
+              <div>
+                <h4 className="text-xs sm:text-sm font-bold text-white font-display">
+                  ৭-দিনের ডিপোজিট চেক-ইন সাইকেল
+                </h4>
+                <p className="text-[11px] text-slate-300">
+                  প্রতিদিন ডিপোজিট করে ক্রমবর্ধিত বোনাস গ্রহণ করুন (১ম দিন ৳১০ থেকে ৭ম দিন ৳৭০ পর্যন্ত)
+                </p>
+              </div>
+              <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/20 px-2.5 py-1 rounded-full border border-emerald-500/40 shrink-0 self-start sm:self-auto">
+                {isCycleCompleted ? 'সাইকেল সম্পন্ন' : `দিন ${currentDayNum}/৭`}
+              </span>
+            </div>
 
+            {/* Attendance Notice or Error */}
+            {attendanceNotice && (
+              <div className="p-2.5 rounded-xl bg-amber-500/20 border border-amber-400/40 text-xs text-amber-200 flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  {attendanceNotice}
+                </span>
+                {onOpenDeposit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenDeposit();
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-amber-400 text-slate-950 font-bold text-[10px] hover:bg-yellow-300 shrink-0 cursor-pointer"
+                  >
+                    ডিপোজিট করুন
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* 7 Days Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {attendanceDays.map((item) => {
-                const isClaimed = claimedDays.includes(item.day);
-                const isNext = item.day === claimedDays.length + 1;
+              {DAILY_CHECKIN_DAYS.map((item) => {
+                const isClaimed = checkInState.claimedDays.includes(item.day);
+                const isCurrent = !isCycleCompleted && item.day === currentDayNum;
 
                 return (
                   <div
                     key={item.day}
-                    className={`p-3 rounded-2xl border flex flex-col items-center justify-between text-center relative ${
+                    className={`p-3 rounded-2xl border flex flex-col items-center justify-between text-center relative transition-all ${
                       isClaimed
                         ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300'
-                        : isNext
-                        ? 'bg-amber-950/40 border-amber-400 text-amber-200 shadow-md ring-1 ring-amber-400/50'
-                        : 'bg-[#060e22] border-blue-500/20 text-slate-400 opacity-60'
+                        : isCurrent && !todayChecked
+                        ? 'bg-amber-950/40 border-amber-400 text-amber-200 shadow-md ring-2 ring-amber-400/40'
+                        : 'bg-[#060e22] border-blue-500/20 text-slate-400'
                     }`}
                   >
-                    <span className="text-[11px] font-bold">{item.label}</span>
-                    <div className="text-2xl my-1">
-                      {item.icon}
+                    <div className="flex items-center justify-between w-full text-[10px] font-bold text-slate-400">
+                      <span>{item.day}-ম দিন</span>
+                      <span className="text-amber-400 font-mono">ডিপোজিট ৳{item.requiredDeposit}</span>
                     </div>
-                    <span className="font-mono font-black text-sm flex items-center gap-1 text-amber-300">
+
+                    <div className="text-2xl my-1.5">{item.icon}</div>
+
+                    <span className="font-mono font-black text-sm flex items-center gap-0.5 text-amber-300">
                       +{getSymbol(currency)}{item.reward}
                     </span>
 
                     <button
                       type="button"
-                      disabled={isClaimed || !isNext}
-                      onClick={() => handleClaimDay(item.day, item.reward)}
-                      className={`w-full mt-2 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+                      disabled={isClaimed || isCycleCompleted || (isCurrent && todayChecked)}
+                      onClick={() => handleClaimDay(item.day, item.reward, item.requiredDeposit)}
+                      className={`w-full mt-2 py-1.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
                         isClaimed
-                          ? 'bg-emerald-800/40 text-emerald-300 cursor-default'
-                          : isNext
-                          ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 shadow-md'
+                          ? 'bg-emerald-800/30 text-emerald-400 border border-emerald-500/30 cursor-default'
+                          : isCurrent && todayChecked
+                          ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                          : isCurrent
+                          ? isDepositMet
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 shadow-md animate-pulse'
+                            : 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 shadow-md'
                           : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                       }`}
                     >
-                      {isClaimed ? 'নেওয়া হয়েছে' : isNext ? 'এখনই নিন' : 'লকড'}
+                      {isClaimed
+                        ? 'সম্পন্ন'
+                        : isCurrent
+                        ? todayChecked
+                          ? 'আজকের শেষ'
+                          : isDepositMet
+                          ? 'ক্লেইম করুন'
+                          : 'শর্ত পূরণ'
+                        : 'লকড'}
                     </button>
                   </div>
                 );
               })}
+            </div>
+
+            {/* Quick Helper / Info */}
+            <div className="p-2.5 rounded-xl bg-blue-950/30 border border-blue-500/20 text-[11px] text-slate-300 flex items-center justify-between">
+              <span>
+                আজ জমা হয়েছে: <strong className={isDepositMet ? 'text-emerald-400' : 'text-amber-400'}>{getSymbol(currency)}{todayDeposit}</strong> / {getSymbol(currency)}{currentDayConfig.requiredDeposit}
+              </span>
+              {isCycleCompleted ? (
+                <span className="text-amber-400 font-bold">৭ দিনের সাইকেল সমাপ্ত</span>
+              ) : !isDepositMet && onOpenDeposit ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenDeposit();
+                  }}
+                  className="text-amber-300 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Wallet className="w-3 h-3" /> ডিপোজিট করুন
+                </button>
+              ) : (
+                <span className="text-emerald-400 font-semibold">শর্ত অনুযায়ী প্রস্তুত</span>
+              )}
             </div>
           </div>
         )}
 
         {/* Tab 3: Lucky Spin Wheel */}
         {activeTab === 'wheel' && (
-          <div className="text-center space-y-4 py-3 animate-in fade-in">
-            <p className="text-xs text-slate-300">
-              ভাগ্য পরীক্ষা করুন! প্রতি স্পিনে সর্বোচ্চ {getSymbol(currency)}5,000 পর্যন্ত রিয়েল রিওয়ার্ড জিতুন।
-            </p>
+          <div className="text-center space-y-4 py-2 animate-in fade-in">
+            <div className="p-3 rounded-2xl bg-[#060e22] border border-blue-500/30 text-left space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs sm:text-sm font-bold text-white font-display">
+                  লাকি ফরচুন স্পিন হুইল
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  নো ফ্রি স্পিন
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300">
+                প্রতি স্পিনের মূল্য {getSymbol(currency)}{SPIN_COST} টাকা। সম্ভাব্য রিওয়ার্ড: {getSymbol(currency)}২, {getSymbol(currency)}৫, {getSymbol(currency)}১০, {getSymbol(currency)}১৫ এবং সর্বোচ্চ {getSymbol(currency)}২০।
+              </p>
+            </div>
 
             <div className="p-6 rounded-3xl bg-[#060e22] border border-blue-500/30 flex flex-col items-center justify-center space-y-3">
               <div
-                className={`w-28 h-28 rounded-full border-4 border-amber-400 flex items-center justify-center bg-gradient-to-tr from-amber-600 via-yellow-400 to-amber-500 shadow-[0_0_30px_rgba(245,158,11,0.5)] text-4xl ${
+                className={`w-32 h-32 rounded-full border-4 border-amber-400 flex items-center justify-center bg-gradient-to-tr from-purple-900 via-indigo-900 to-[#0e1d44] shadow-[0_0_30px_rgba(245,158,11,0.4)] text-3xl font-black text-amber-300 ${
                   wheelSpinning ? 'animate-spin' : ''
                 }`}
               >
-                🎁
+                {wheelSpinning ? '🌀' : '🎡'}
               </div>
 
-              {wheelResult && (
+              {/* Spin Prize Strip Preview */}
+              <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1">
+                {LOW_REWARD_SPIN_PRIZES.slice(0, 5).map((p, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-mono font-bold"
+                    style={{ color: p.color }}
+                  >
+                    {p.label}
+                  </span>
+                ))}
+              </div>
+
+              {wheelResult !== null && (
                 <p className="text-sm font-black text-emerald-400 animate-bounce">
                   🎉 অভিনন্দন! জিতেছেন +{getSymbol(currency)}{wheelResult}!
                 </p>
+              )}
+
+              {wheelError && (
+                <div className="p-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-xs text-rose-300 flex items-center justify-center gap-2">
+                  <span>{wheelError}</span>
+                  {onOpenDeposit && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenDeposit();
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-amber-400 text-slate-950 font-bold text-[10px] hover:bg-yellow-300 cursor-pointer"
+                    >
+                      রিচার্জ
+                    </button>
+                  )}
+                </div>
               )}
 
               <button
                 type="button"
                 disabled={wheelSpinning}
                 onClick={handleSpinWheel}
-                className="px-6 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600 hover:brightness-110 text-slate-950 font-black text-xs sm:text-sm shadow-xl shadow-amber-950/50 cursor-pointer active:scale-95 transition-all"
+                className="w-full max-w-xs py-2.5 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-sky-500 hover:brightness-110 text-white font-black text-xs sm:text-sm shadow-xl shadow-purple-950/50 cursor-pointer active:scale-95 transition-all flex items-center justify-center gap-2"
               >
-                {wheelSpinning ? 'হুইল ঘুরছে...' : 'লাকি স্পিন চালু করুন'}
+                <Zap className="w-4 h-4" />
+                <span>
+                  {wheelSpinning
+                    ? 'হুইল ঘুরছে...'
+                    : user.balance < SPIN_COST
+                    ? `২০ টাকায় স্পিন কিনুন (ব্যালেন্স অপর্যাপ্ত)`
+                    : `২০ টাকায় স্পিন করুন (${getSymbol(currency)}${SPIN_COST} কাটা হবে)`}
+                </span>
               </button>
             </div>
           </div>
