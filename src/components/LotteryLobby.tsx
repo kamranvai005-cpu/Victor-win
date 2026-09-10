@@ -10,6 +10,7 @@ import {
 import { Currency } from '../types';
 import { sound } from '../utils/audio';
 import { getLocalConfig, subscribeSystemConfig } from '../utils/firebase';
+import { WINGO_ASSETS } from '../utils/wingoAssets';
 
 interface LotteryLobbyProps {
   onSelectGame: (gameType: 'wingo' | 'k3' | '5d' | 'trx-wingo', duration?: number) => void;
@@ -86,7 +87,11 @@ export function LotteryLobby({
   return (
     <div className="space-y-4 animate-in fade-in">
       {/* Category Header */}
-      <div className="relative rounded-3xl overflow-hidden p-5 sm:p-6 border border-blue-500/30 shadow-2xl bg-gradient-to-r from-[#08122c] via-[#0b1b42] to-[#08122c]">
+      <div
+        className="relative rounded-3xl overflow-hidden p-5 sm:p-6 border border-blue-500/30 shadow-2xl bg-cover bg-center"
+        style={{ backgroundImage: `url(${WINGO_ASSETS.lotteryBg})` }}
+      >
+        <div className="absolute inset-0 bg-[#08122c]/85 backdrop-blur-[2px] pointer-events-none" />
 
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">

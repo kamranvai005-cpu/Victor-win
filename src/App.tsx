@@ -538,6 +538,7 @@ export default function App() {
                     onUpdateBalance={handleUpdateBalance}
                     currency={currency}
                     onOpenDeposit={() => setShowDeposit(true)}
+                    onOpenWithdraw={() => setShowWithdraw(true)}
                     onBackToLobby={() => setActiveGameArena('none')}
                     initialDuration={activeDuration}
                     userPhone={user.phone}

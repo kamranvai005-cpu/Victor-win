@@ -59,12 +59,17 @@ import {
   getLocalConfig,
   updateSystemConfig,
   getLocalDepositRequests,
+  fetchRemoteDepositRequests,
   updateDepositRequestStatus,
+  subscribeDepositRequests,
   getLocalWithdrawalRequests,
+  fetchRemoteWithdrawalRequests,
   updateWithdrawalRequestStatus,
+  subscribeWithdrawalRequests,
   subscribeSystemConfig,
   subscribeMembers,
   getLocalMembers,
+  fetchRemoteMembers,
   saveLocalMember,
   updateLocalMember,
   deleteLocalMember,
@@ -147,9 +152,9 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
   // Live Bets Monitoring State
   const [liveBets, setLiveBets] = useState<LiveBetRecord[]>(() => getStoredLiveBets());
 
-  // Subscribe to Firebase real-time updates & clock
+  // Subscribe to Central Server & Firebase real-time updates & clock
   useEffect(() => {
-    const unsub = subscribeSystemConfig((newCfg) => {
+    const unsubConfig = subscribeSystemConfig((newCfg) => {
       setConfig(newCfg);
     });
 
@@ -159,11 +164,17 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
       }
     });
 
+    const unsubDeposits = subscribeDepositRequests((freshDeposits) => {
+      setDepositRequests(freshDeposits);
+    });
+
+    const unsubWithdrawals = subscribeWithdrawalRequests((freshWithdrawals) => {
+      setWithdrawalRequests(freshWithdrawals);
+    });
+
     const clockInterval = setInterval(() => {
       setLiveWinGo(getRealtimeWinGo(30));
       setLiveAviator(getRealtimeAviator());
-      setDepositRequests(getLocalDepositRequests());
-      setWithdrawalRequests(getLocalWithdrawalRequests());
       setLiveBets(getStoredLiveBets());
       setCurrentTime(new Date().toLocaleTimeString());
     }, 1000);
@@ -171,13 +182,26 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
     const handleBetPlaced = () => {
       setLiveBets(getStoredLiveBets());
     };
+
+    const handleDepositSubmitted = () => {
+      fetchRemoteDepositRequests().then((fresh) => {
+        if (fresh) setDepositRequests(fresh);
+      });
+      sound.playWin();
+      showToast('🔔 নতুন ডিপোজিট রিকোয়েস্ট এসেছে!');
+    };
+
     window.addEventListener('victorwin_live_bet_placed', handleBetPlaced);
+    window.addEventListener('victorwin_deposit_submitted', handleDepositSubmitted);
 
     return () => {
-      unsub();
+      unsubConfig();
       unsubMembers();
+      unsubDeposits();
+      unsubWithdrawals();
       clearInterval(clockInterval);
       window.removeEventListener('victorwin_live_bet_placed', handleBetPlaced);
+      window.removeEventListener('victorwin_deposit_submitted', handleDepositSubmitted);
     };
   }, []);
 
@@ -337,23 +361,27 @@ export function AdminPanel({ onExit, onLogout, userEmail = 'admin@gmail.com' }: 
     showToast(`ইউআইডি ${user.uid} এর জন্য গিফট কোড ফরম প্রস্তুত করা হয়েছে!`);
   };
 
-  const handleDepositAction = (id: string, status: 'approved' | 'rejected') => {
+  const handleDepositAction = async (id: string, status: 'approved' | 'rejected') => {
     sound.playWin();
-    updateDepositRequestStatus(id, status);
-    setDepositRequests(getLocalDepositRequests());
-    setMembers(getLocalMembers());
+    await updateDepositRequestStatus(id, status);
+    const fresh = await fetchRemoteDepositRequests();
+    if (fresh) setDepositRequests(fresh);
+    const freshMembers = await fetchRemoteMembers();
+    if (freshMembers) setMembers(freshMembers);
     showToast(`ডিপোজিট রিকোয়েস্ট ${status === 'approved' ? 'অনুমোদিত ও ব্যালেন্সে টাকা যোগ' : 'প্রত্যাখ্যাত'} হয়েছে!`);
   };
 
-  const handleWithdrawalAction = (id: string, status: 'approved' | 'rejected', reason?: string) => {
+  const handleWithdrawalAction = async (id: string, status: 'approved' | 'rejected', reason?: string) => {
     if (status === 'approved') {
       sound.playWin();
     } else {
       sound.playLose();
     }
-    updateWithdrawalRequestStatus(id, status, reason);
-    setWithdrawalRequests(getLocalWithdrawalRequests());
-    setMembers(getLocalMembers());
+    await updateWithdrawalRequestStatus(id, status, reason);
+    const fresh = await fetchRemoteWithdrawalRequests();
+    if (fresh) setWithdrawalRequests(fresh);
+    const freshMembers = await fetchRemoteMembers();
+    if (freshMembers) setMembers(freshMembers);
     showToast(
       `উইথড্র রিকোয়েস্ট ${status === 'approved' ? 'সফলভাবে অনুমোদন করা হয়েছে (Success)' : 'বাতিল ও টাকা রিফান্ড করা হয়েছে'}!`
     );

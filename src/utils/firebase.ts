@@ -337,10 +337,34 @@ export function saveLocalConfig(config: SystemConfig) {
   }
 }
 
-// Synchronize with Firebase Firestore
+// Synchronize with Central Server & Firebase Firestore
 export function subscribeSystemConfig(onUpdate: (config: SystemConfig) => void) {
   const local = getLocalConfig();
   onUpdate(local);
+
+  // Immediate fetch from central server
+  fetch('/api/config')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((remote) => {
+      if (remote) {
+        saveLocalConfig(remote);
+        onUpdate(remote);
+      }
+    })
+    .catch(() => {});
+
+  // 1-second real-time polling to ensure instant updates across all phones
+  const serverInterval = setInterval(() => {
+    fetch('/api/config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((remote) => {
+        if (remote) {
+          saveLocalConfig(remote);
+          onUpdate(remote);
+        }
+      })
+      .catch(() => {});
+  }, 1000);
 
   try {
     const configDocRef = doc(db, 'system', 'app_config');
@@ -363,26 +387,21 @@ export function subscribeSystemConfig(onUpdate: (config: SystemConfig) => void) 
           };
           saveLocalConfig(merged);
           onUpdate(merged);
-        } else {
-          // Initialize remote doc if missing
-          setDoc(configDocRef, local, { merge: true }).catch((err) =>
-            console.log('Firebase bootstrap info:', err)
-          );
         }
       },
-      (error) => {
-        console.warn('Firestore snapshot listener falling back to local sync:', error.message);
-      }
+      () => {}
     );
 
-    return unsubscribe;
+    return () => {
+      clearInterval(serverInterval);
+      unsubscribe();
+    };
   } catch (e) {
-    console.warn('Firebase connection notice:', e);
-    return () => {};
+    return () => clearInterval(serverInterval);
   }
 }
 
-// Update remote Firestore config
+// Update remote config across all phones instantly
 export async function updateSystemConfig(newConfig: Partial<SystemConfig>): Promise<void> {
   const current = getLocalConfig();
   const merged: SystemConfig = {
@@ -398,12 +417,22 @@ export async function updateSystemConfig(newConfig: Partial<SystemConfig>): Prom
 
   saveLocalConfig(merged);
 
+  // Sync with central server immediately
+  try {
+    await fetch('/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newConfig),
+    });
+  } catch (e) {
+    console.warn('Central server config sync:', e);
+  }
+
+  // Backup to Firebase
   try {
     const configDocRef = doc(db, 'system', 'app_config');
     await setDoc(configDocRef, merged, { merge: true });
-  } catch (e) {
-    console.warn('Saved locally, Firestore sync deferred:', e);
-  }
+  } catch (e) {}
 }
 
 // Deposit requests management
@@ -417,30 +446,75 @@ export function getLocalDepositRequests(): DepositRequest[] {
   return [];
 }
 
-export function saveDepositRequest(req: DepositRequest) {
+// Fetch remote deposits from central backend
+export async function fetchRemoteDepositRequests(): Promise<DepositRequest[]> {
+  try {
+    const res = await fetch('/api/deposits');
+    if (res.ok) {
+      const serverDeposits: DepositRequest[] = await res.json();
+      if (Array.isArray(serverDeposits)) {
+        localStorage.setItem(DEPOSIT_REQUESTS_KEY, JSON.stringify(serverDeposits));
+        return serverDeposits;
+      }
+    }
+  } catch (e) {}
+  return getLocalDepositRequests();
+}
+
+// Save deposit request (sent from any user's phone to central server immediately)
+export async function saveDepositRequest(req: DepositRequest): Promise<void> {
   const list = getLocalDepositRequests();
-  const updated = [req, ...list.filter((r) => r.id !== req.id)].slice(0, 100);
+  const updated = [req, ...list.filter((r) => r.id !== req.id)].slice(0, 500);
   localStorage.setItem(DEPOSIT_REQUESTS_KEY, JSON.stringify(updated));
 
-  // Try pushing to Firebase collection
+  // Dispatch local notification
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('victorwin_deposit_submitted', { detail: req }));
+  }
+
+  // POST to Central Server API (so Admin Panel on ANY device gets it instantly)
+  try {
+    await fetch('/api/deposits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+  } catch (e) {
+    console.warn('Central server deposit dispatch notice:', e);
+  }
+
+  // Dual Backup: Push to Firebase collection
   try {
     const depDocRef = doc(db, 'deposit_requests', req.id);
     setDoc(depDocRef, req, { merge: true }).catch(() => {});
   } catch (e) {}
 }
 
-export function updateDepositRequestStatus(reqId: string, status: 'approved' | 'rejected') {
+// Update deposit status (Approve or Reject from Admin Panel)
+export async function updateDepositRequestStatus(reqId: string, status: 'approved' | 'rejected') {
   const list = getLocalDepositRequests();
   const targetReq = list.find((r) => r.id === reqId);
   const updated = list.map((r) => (r.id === reqId ? { ...r, status, approvedAt: status === 'approved' ? Date.now() : undefined } : r));
   localStorage.setItem(DEPOSIT_REQUESTS_KEY, JSON.stringify(updated));
 
+  // Call Central Server API immediately
+  try {
+    await fetch(`/api/deposits/${reqId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+  } catch (e) {
+    console.warn('Server deposit status update notice:', e);
+  }
+
+  // Dual Backup: Firebase update
   try {
     const depDocRef = doc(db, 'deposit_requests', reqId);
     updateDoc(depDocRef, { status, approvedAt: status === 'approved' ? Date.now() : undefined }).catch(() => {});
   } catch (e) {}
 
-  // If approved and was not already approved, credit the member's wallet balance!
+  // If approved and was not already approved, credit the member's wallet balance
   if (status === 'approved' && targetReq && targetReq.status !== 'approved') {
     const members = getLocalMembers();
     const targetMember = members.find((m) =>
@@ -469,6 +543,25 @@ export function updateDepositRequestStatus(reqId: string, status: 'approved' | '
       }
     }
   }
+}
+
+// 1-second real-time subscription for Deposit Requests (for Admin Panel & Notification)
+export function subscribeDepositRequests(onUpdate: (deposits: DepositRequest[]) => void) {
+  // Yield initial local requests
+  onUpdate(getLocalDepositRequests());
+
+  // Fetch immediately from server
+  fetchRemoteDepositRequests().then((deposits) => {
+    if (deposits) onUpdate(deposits);
+  });
+
+  // Poll server every 1 second (1000ms) for instant cross-device updates
+  const interval = setInterval(async () => {
+    const fresh = await fetchRemoteDepositRequests();
+    if (fresh) onUpdate(fresh);
+  }, 1000);
+
+  return () => clearInterval(interval);
 }
 
 // Withdrawal requests management for Admin & User
@@ -515,19 +608,42 @@ export function getLocalWithdrawalRequests(): WithdrawalRequest[] {
   return DEFAULT_WITHDRAWALS;
 }
 
-export function saveWithdrawalRequest(req: WithdrawalRequest) {
+export async function fetchRemoteWithdrawalRequests(): Promise<WithdrawalRequest[]> {
+  try {
+    const res = await fetch('/api/withdrawals');
+    if (res.ok) {
+      const serverWithdrawals: WithdrawalRequest[] = await res.json();
+      if (Array.isArray(serverWithdrawals)) {
+        localStorage.setItem(WITHDRAWAL_REQUESTS_KEY, JSON.stringify(serverWithdrawals));
+        return serverWithdrawals;
+      }
+    }
+  } catch (e) {}
+  return getLocalWithdrawalRequests();
+}
+
+export async function saveWithdrawalRequest(req: WithdrawalRequest) {
   const list = getLocalWithdrawalRequests();
   const updated = [req, ...list.filter((r) => r.id !== req.id)].slice(0, 100);
   localStorage.setItem(WITHDRAWAL_REQUESTS_KEY, JSON.stringify(updated));
 
-  // Try pushing to Firebase collection
+  // Sync to Central Server
+  try {
+    await fetch('/api/withdrawals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+  } catch (e) {}
+
+  // Dual Backup to Firebase
   try {
     const wthDocRef = doc(db, 'withdrawal_requests', req.id);
     setDoc(wthDocRef, req, { merge: true }).catch(() => {});
   } catch (e) {}
 }
 
-export function updateWithdrawalRequestStatus(
+export async function updateWithdrawalRequestStatus(
   reqId: string,
   status: 'approved' | 'rejected',
   rejectReason?: string
@@ -545,6 +661,15 @@ export function updateWithdrawalRequestStatus(
       : r
   );
   localStorage.setItem(WITHDRAWAL_REQUESTS_KEY, JSON.stringify(updated));
+
+  // Sync to Central Server
+  try {
+    await fetch(`/api/withdrawals/${reqId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, rejectReason }),
+    });
+  } catch (e) {}
 
   try {
     const wthDocRef = doc(db, 'withdrawal_requests', reqId);
@@ -581,6 +706,21 @@ export function updateWithdrawalRequestStatus(
       }
     }
   }
+}
+
+export function subscribeWithdrawalRequests(onUpdate: (withdrawals: WithdrawalRequest[]) => void) {
+  onUpdate(getLocalWithdrawalRequests());
+
+  fetchRemoteWithdrawalRequests().then((wths) => {
+    if (wths) onUpdate(wths);
+  });
+
+  const interval = setInterval(async () => {
+    const fresh = await fetchRemoteWithdrawalRequests();
+    if (fresh) onUpdate(fresh);
+  }, 1000);
+
+  return () => clearInterval(interval);
 }
 
 // User / Member Registry Management for Admin
@@ -789,6 +929,20 @@ export function getLocalMembers(): RegisteredMember[] {
   return DEFAULT_MEMBERS;
 }
 
+export async function fetchRemoteMembers(): Promise<RegisteredMember[]> {
+  try {
+    const res = await fetch('/api/members');
+    if (res.ok) {
+      const serverMembers = await res.json();
+      if (Array.isArray(serverMembers) && serverMembers.length > 0) {
+        localStorage.setItem(MEMBERS_STORAGE_KEY, JSON.stringify(serverMembers));
+        return serverMembers;
+      }
+    }
+  } catch (e) {}
+  return getLocalMembers();
+}
+
 export function saveLocalMember(member: RegisteredMember) {
   const current = getLocalMembers();
   const existingIndex = current.findIndex((m) => m.uid === member.uid || m.phone === member.phone);
@@ -804,6 +958,15 @@ export function saveLocalMember(member: RegisteredMember) {
     const userDocRef = doc(db, 'users', member.uid);
     setDoc(userDocRef, member, { merge: true }).catch(() => {});
   } catch (e) {}
+
+  // Sync to Central Server
+  try {
+    fetch('/api/members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(member),
+    }).catch(() => {});
+  } catch (e) {}
 }
 
 export function updateLocalMember(uid: string, fields: Partial<RegisteredMember>) {
@@ -814,6 +977,15 @@ export function updateLocalMember(uid: string, fields: Partial<RegisteredMember>
     const userDocRef = doc(db, 'users', uid);
     setDoc(userDocRef, fields, { merge: true }).catch(() => {});
   } catch (e) {}
+
+  // Sync to Central Server
+  try {
+    fetch(`/api/members/${uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    }).catch(() => {});
+  } catch (e) {}
 }
 
 export function deleteLocalMember(uid: string) {
@@ -822,6 +994,49 @@ export function deleteLocalMember(uid: string) {
   try {
     localStorage.setItem(MEMBERS_STORAGE_KEY, JSON.stringify(updated));
   } catch (e) {}
+
+  try {
+    fetch(`/api/members/${uid}`, {
+      method: 'DELETE',
+    }).catch(() => {});
+  } catch (e) {}
+}
+
+export function subscribeMembers(onUpdate: (members: RegisteredMember[]) => void) {
+  onUpdate(getLocalMembers());
+
+  fetchRemoteMembers().then((mems) => {
+    if (mems) onUpdate(mems);
+  });
+
+  const interval = setInterval(async () => {
+    const fresh = await fetchRemoteMembers();
+    if (fresh) onUpdate(fresh);
+  }, 1000);
+
+  let unsubFirestore = () => {};
+  try {
+    const usersColRef = collection(db, 'users');
+    unsubFirestore = onSnapshot(
+      usersColRef,
+      (snapshot) => {
+        const remoteList: RegisteredMember[] = [];
+        snapshot.forEach((d) => {
+          remoteList.push(d.data() as RegisteredMember);
+        });
+        if (remoteList.length > 0) {
+          onUpdate(remoteList);
+          localStorage.setItem(MEMBERS_STORAGE_KEY, JSON.stringify(remoteList));
+        }
+      },
+      () => {}
+    );
+  } catch (e) {}
+
+  return () => {
+    clearInterval(interval);
+    unsubFirestore();
+  };
 }
 
 // Live Firebase Connection Check
@@ -945,30 +1160,4 @@ export async function firebaseLoginMember(
   }
 }
 
-// Real-time listener for Registered Members
-export function subscribeMembers(onUpdate: (members: RegisteredMember[]) => void) {
-  try {
-    const usersColRef = collection(db, 'users');
-    const unsubscribe = onSnapshot(
-      usersColRef,
-      (snapshot) => {
-        const remoteList: RegisteredMember[] = [];
-        snapshot.forEach((d) => {
-          remoteList.push(d.data() as RegisteredMember);
-        });
-        if (remoteList.length > 0) {
-          onUpdate(remoteList);
-          localStorage.setItem(MEMBERS_STORAGE_KEY, JSON.stringify(remoteList));
-        }
-      },
-      (error) => {
-        console.warn('Users snapshot error:', error.message);
-      }
-    );
-    return unsubscribe;
-  } catch (e) {
-    console.warn('Firebase users subscribe error:', e);
-    return () => {};
-  }
-}
 

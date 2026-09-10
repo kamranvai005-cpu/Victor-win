@@ -15,6 +15,7 @@ import {
 import { UserProfile, Currency } from '../types';
 import { getCurrencySymbol } from '../utils/currency';
 import { sound } from '../utils/audio';
+import { WINGO_ASSETS } from '../utils/wingoAssets';
 
 interface UserWalletCardProps {
   user: UserProfile;
@@ -58,9 +59,14 @@ export function UserWalletCard({
   };
 
   return (
-    <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-[#0c1b3f] via-[#081430] to-[#0e214d] border border-blue-500/30 p-4 sm:p-5 shadow-2xl space-y-4">
+    <div
+      className="relative rounded-3xl overflow-hidden border border-amber-500/30 p-4 sm:p-5 shadow-2xl space-y-4 bg-cover bg-center"
+      style={{ backgroundImage: `url(${WINGO_ASSETS.walletBg})` }}
+    >
+      <div className="absolute inset-0 bg-[#08122c]/85 backdrop-blur-[1px] pointer-events-none" />
+
       {/* Upper row: User Info & Balance */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         {/* User Identity */}
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -104,9 +110,9 @@ export function UserWalletCard({
         </div>
 
         {/* Balance Display */}
-        <div className="flex items-center justify-between sm:justify-end gap-3 bg-[#060e22]/90 border border-blue-500/20 p-2.5 sm:px-4 sm:py-2 rounded-2xl">
+        <div className="flex items-center justify-between sm:justify-end gap-3 bg-[#040918]/90 border border-amber-500/30 p-2.5 sm:px-4 sm:py-2 rounded-2xl shadow-inner">
           <div>
-            <span className="text-[10px] uppercase text-slate-400 font-semibold block leading-none">
+            <span className="text-[10px] uppercase text-slate-300 font-semibold block leading-none">
               Wallet Balance (ওয়ালেট ব্যালেন্স)
             </span>
             <div className="flex items-center gap-2 mt-0.5">
@@ -119,12 +125,15 @@ export function UserWalletCard({
           <button
             type="button"
             onClick={handleRefresh}
-            className={`p-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-sky-400 transition-all cursor-pointer ${
-              isRefreshing ? 'animate-spin text-amber-400' : ''
-            }`}
+            className="p-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 transition-all cursor-pointer active:scale-90"
             title="Refresh Wallet Balance"
           >
-            <RefreshCw className="w-4 h-4" />
+            <img
+              src={WINGO_ASSETS.refreshIcon}
+              alt="Refresh"
+              className={`w-4 h-4 object-contain transition-transform duration-500 ${isRefreshing ? 'rotate-180 scale-110' : 'hover:rotate-45'}`}
+              referrerPolicy="no-referrer"
+            />
           </button>
         </div>
       </div>

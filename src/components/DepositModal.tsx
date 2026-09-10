@@ -168,7 +168,7 @@ export function DepositModal({
     setStep(2);
   };
 
-  const handleFinalSubmit = (e: React.FormEvent) => {
+  const handleFinalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanTrx = trxId.trim();
     if (!cleanTrx || cleanTrx.length < 6) {
@@ -188,7 +188,7 @@ export function DepositModal({
     // 10% First Deposit / Special Bonus
     const bonus = Math.round(finalDepositAmount * 0.10);
 
-    // Record in Firebase Realtime Deposit Queue with PENDING status for Admin Approval
+    // Record in Central Realtime Deposit Queue with PENDING status for Admin Approval
     const newDepositRecord = {
       id: 'DEP_' + Date.now(),
       uid: userId || 'VW889241',
@@ -206,10 +206,10 @@ export function DepositModal({
       createdAt: Date.now(),
       formattedTime: new Date().toLocaleTimeString(),
     };
-    saveDepositRequest(newDepositRecord);
+    await saveDepositRequest(newDepositRecord);
     addTodayDepositAmount(finalDepositAmount, userId || username);
 
-    // After brief verification delay, show Pending Awaiting Admin Verification screen (NO auto-credit)
+    // Promptly show Pending Awaiting Admin Verification screen
     setTimeout(() => {
       setIsProcessing(false);
       sound.playClick();
@@ -220,7 +220,7 @@ export function DepositModal({
         method: selectedChannel.name,
         senderNumber: cleanSender,
       });
-    }, 900);
+    }, 400);
   };
 
   return (

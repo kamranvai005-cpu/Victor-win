@@ -18,12 +18,14 @@ import { WinGoResult, WinGoBet, Currency } from '../types';
 import { sound } from '../utils/audio';
 import { getRealtimeWinGo, recordLiveBet } from '../utils/gameSync';
 import { WinGoHistoryModal } from './WinGoHistoryModal';
+import { WINGO_ASSETS, getBallImage } from '../utils/wingoAssets';
 
 interface WinGoGameProps {
   userBalance: number;
   onUpdateBalance: (newBalance: number) => void;
   currency: Currency;
   onOpenDeposit: () => void;
+  onOpenWithdraw?: () => void;
   onBackToLobby?: () => void;
   initialDuration?: number;
   userPhone?: string;
@@ -36,6 +38,7 @@ export function WinGoGame({
   onUpdateBalance,
   currency,
   onOpenDeposit,
+  onOpenWithdraw,
   onBackToLobby,
   initialDuration = 30,
   userPhone = '01712345678',
@@ -55,15 +58,27 @@ export function WinGoGame({
   const [activeTab, setActiveTab] = useState<'history' | 'chart' | 'mybets'>('history');
   const [selectedBetType, setSelectedBetType] = useState<'color' | 'number' | 'size' | null>(null);
   const [selectedBetValue, setSelectedBetValue] = useState<string | null>(null);
-  const [chipAmount, setChipAmount] = useState<number>(50);
+  const [chipAmount, setChipAmount] = useState<number>(10);
   const [chipMultiplier, setChipMultiplier] = useState<number>(1);
+  const [betQuantity, setBetQuantity] = useState<number>(1);
   const [showBetDialog, setShowBetDialog] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [agreeRules, setAgreeRules] = useState(true);
 
   // My Bets record
   const [myBets, setMyBets] = useState<WinGoBet[]>([]);
   const [winModalData, setWinModalData] = useState<{ win: boolean; amount: number; num: number; period: string } | null>(null);
 
   const getSymbol = (c: Currency) => (c === 'BDT' ? '৳' : c === 'INR' ? '₹' : '$');
+  const sym = getSymbol(currency);
+
+  const durationName = (sec: number) => {
+    if (sec === 30) return 'WinGo 30sec';
+    if (sec === 60) return 'WinGo 1 Min';
+    if (sec === 180) return 'WinGo 3 Min';
+    if (sec === 300) return 'WinGo 5 Min';
+    return `WinGo ${sec / 60} Min`;
+  };
 
   // Real-time Clock Sync Loop
   useEffect(() => {
@@ -141,8 +156,6 @@ export function WinGoGame({
                   confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
                   onUpdateBalance(userBalance + totalWon);
                   setWinModalData({ win: true, amount: totalWon, num: endedDraw.number, period: endedPeriod });
-                } else {
-                  setWinModalData({ win: false, amount: 0, num: endedDraw.number, period: endedPeriod });
                 }
               }
 
@@ -157,21 +170,34 @@ export function WinGoGame({
     return () => clearInterval(interval);
   }, [durationSec, userBalance]);
 
+  // Auto-close congratulations modal after 3.5 seconds
+  useEffect(() => {
+    if (winModalData) {
+      const timer = setTimeout(() => {
+        setWinModalData(null);
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [winModalData]);
+
   const handleOpenBet = (type: 'color' | 'number' | 'size', value: string) => {
     if (syncState.isFreeze) return;
     sound.playChip();
     setSelectedBetType(type);
     setSelectedBetValue(value);
+    setChipAmount(1);
+    setBetQuantity(1);
+    setChipMultiplier(1);
     setShowBetDialog(true);
   };
 
   const handlePlaceBet = () => {
     if (!selectedBetType || !selectedBetValue) return;
-    const totalStake = chipAmount * chipMultiplier;
+    const totalStake = chipAmount * betQuantity * chipMultiplier;
 
     if (userBalance < totalStake) {
       sound.playClick();
-      alert('অপর্যাপ্ত ব্যালেন্স! অনুগ্রহ করে ওয়ালেটে রিচার্জ করুন।');
+      alert('আপনার ওয়ালেটে পর্যাপ্ত ব্যালেন্স নেই! অনুগ্রহ করে ডিপোজিট করুন।');
       onOpenDeposit();
       return;
     }
@@ -185,7 +211,7 @@ export function WinGoGame({
       selectType: selectedBetType,
       selection: selectedBetValue,
       amount: chipAmount,
-      multiplier: chipMultiplier,
+      multiplier: chipMultiplier * betQuantity,
       totalStake,
       status: 'pending',
       time: new Date().toTimeString().slice(0, 8),
@@ -202,7 +228,7 @@ export function WinGoGame({
       selectType: selectedBetType,
       selection: selectedBetValue,
       amount: chipAmount,
-      multiplier: chipMultiplier,
+      multiplier: chipMultiplier * betQuantity,
       totalStake,
       placedAt: newBet.time,
       timestamp: Date.now(),
@@ -213,28 +239,26 @@ export function WinGoGame({
     setShowBetDialog(false);
   };
 
-  const getBallClass = (num: number, color?: string) => {
-    if (num === 0) return 'ball-red-violet text-white';
-    if (num === 5) return 'ball-green-violet text-white';
-    if ([1, 3, 7, 9].includes(num) || color === 'green') return 'ball-green text-white';
-    return 'ball-red text-white';
-  };
-
-  const formatSeconds = (sec: number) => {
+  const getDigits = (sec: number) => {
     const mins = Math.floor(sec / 60);
     const secs = sec % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    const minStr = mins.toString().padStart(2, '0');
+    const secStr = secs.toString().padStart(2, '0');
+    return {
+      m1: minStr[0],
+      m2: minStr[1],
+      s1: secStr[0],
+      s2: secStr[1],
+    };
   };
 
-  const durationLabel = (sec: number) => {
-    if (sec === 30) return '30S';
-    return `${sec / 60}Min`;
-  };
+  const digits = getDigits(syncState.timeLeft);
+  const totalBetAmount = chipAmount * betQuantity * chipMultiplier;
 
   return (
-    <div className="w-full space-y-3 animate-in fade-in text-slate-100 max-w-3xl mx-auto pb-10">
-      {/* Top Standalone Header - Purely Market, Balance & Back button */}
-      <div className="flex items-center justify-between gap-2 bg-[#08122c] border border-blue-500/30 p-3 sm:p-4 rounded-3xl shadow-xl">
+    <div className="w-full max-w-[480px] mx-auto bg-[#f5f5f5] text-slate-800 rounded-3xl shadow-2xl relative overflow-hidden pb-12 font-sans select-none animate-in fade-in">
+      {/* 1. Header (HGNICE Red Header) */}
+      <div className="bg-[#f15252] text-white px-4 py-3 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-2">
           {onBackToLobby && (
             <button
@@ -243,391 +267,417 @@ export function WinGoGame({
                 sound.playClick();
                 onBackToLobby();
               }}
-              className="px-3 py-2 rounded-2xl bg-gradient-to-r from-blue-700 to-indigo-800 hover:from-blue-600 hover:to-indigo-700 border border-blue-400/40 text-white font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-lg active:scale-95"
+              className="p-1 rounded-full hover:bg-black/15 transition-colors cursor-pointer text-white mr-1"
+              title="লবিতে ফিরে যান"
             >
-              <ArrowLeft className="w-4 h-4 text-amber-300" />
-              <span>লবিতে ফিরুন</span>
+              <ArrowLeft className="w-5 h-5" />
             </button>
           )}
-
-          <div className="flex flex-col">
-            <span className="text-xs sm:text-sm font-black text-white font-display">
-              Win Go {durationLabel(durationSec)}
-            </span>
-            <span className="text-[10px] text-amber-400 font-mono font-bold">
-              মার্কেট লাইভ
-            </span>
-          </div>
+          <span className="text-xl font-black italic tracking-wider">HGNICE</span>
         </div>
 
-        {/* Live Wallet Balance inside Game Header */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-[#040918] border border-amber-500/40 shadow-inner">
-            <Wallet className="w-3.5 h-3.5 text-amber-400" />
-            <div className="flex flex-col text-right leading-none">
-              <span className="text-[9px] text-slate-400 font-bold uppercase">ব্যালেন্স</span>
-              <span className="font-mono font-black text-xs sm:text-sm text-emerald-400">
-                {getSymbol(currency)}{userBalance.toFixed(2)}
-              </span>
-            </div>
-          </div>
-
+        <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={onOpenDeposit}
-            className="px-3 py-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:brightness-110 text-white font-black text-xs flex items-center gap-1 shadow-md cursor-pointer active:scale-95"
+            onClick={() => sound.playClick()}
+            className="w-7 h-7 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-xs cursor-pointer transition-transform active:scale-90"
+            title="সার্ভিস"
           >
-            <PlusCircle className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">ডিপোজিট</span>
+            🎧
+          </button>
+          <button
+            type="button"
+            onClick={() => sound.playClick()}
+            className="w-7 h-7 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-xs cursor-pointer transition-transform active:scale-90"
+            title="সাউন্ড"
+          >
+            🔊
           </button>
         </div>
       </div>
 
-      {/* Duration Selector Tabs: 30S, 1M, 3M, 5M, 10M */}
-      <div className="flex items-center gap-1.5 bg-[#091533] p-1.5 rounded-2xl border border-blue-500/30 overflow-x-auto scrollbar-none justify-between sm:justify-center">
-        {[30, 60, 180, 300, 600].map((dur) => (
+      {/* 2. Wallet Card (Exact HGNICE Wallet Card Design) */}
+      <div
+        className="m-3 p-5 rounded-2xl text-white shadow-md relative overflow-hidden bg-cover bg-center"
+        style={{ backgroundImage: `url(${WINGO_ASSETS.walletBg})` }}
+      >
+        <div className="relative z-10 flex flex-col items-center justify-center">
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-xl font-bold">{sym}</span>
+            <span className="text-3xl font-black font-mono tracking-tight">
+              {userBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                sound.playClick();
+                setIsRefreshing(true);
+                setTimeout(() => setIsRefreshing(false), 600);
+              }}
+              className="cursor-pointer active:scale-85 transition-transform ml-1 p-0.5"
+              title="ব্যালেন্স রিফ্রেশ"
+            >
+              <img
+                src={WINGO_ASSETS.refreshIcon}
+                alt="Refresh"
+                className={`w-4 h-4 object-contain transition-transform duration-500 ${
+                  isRefreshing ? 'rotate-180 scale-110' : 'hover:rotate-45'
+                }`}
+                referrerPolicy="no-referrer"
+              />
+            </button>
+          </div>
+
+          <div className="text-xs text-white/90 font-medium mt-1 mb-4">
+            Wallet balance (ওয়ালেট ব্যালেন্স)
+          </div>
+
+          <div className="w-full flex gap-3">
+            <button
+              type="button"
+              onClick={onOpenWithdraw}
+              className="flex-1 py-2.5 rounded-full bg-[#f15252] hover:bg-[#e04545] text-white font-bold text-sm shadow-md transition-all active:scale-95 cursor-pointer text-center"
+            >
+              Withdraw (উইথড্র)
+            </button>
+            <button
+              type="button"
+              onClick={onOpenDeposit}
+              className="flex-1 py-2.5 rounded-full bg-[#2ecc71] hover:bg-[#27ae60] text-white font-bold text-sm shadow-md transition-all active:scale-95 cursor-pointer text-center"
+            >
+              Deposit (ডিপোজিট)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Notice Bar */}
+      <div className="bg-[#fff0f0] px-3 py-1.5 mx-3 mb-3 rounded-lg flex items-center justify-between text-[11px] text-slate-600 shadow-sm border border-red-100">
+        <div className="overflow-hidden whitespace-nowrap text-ellipsis mr-2 flex-1">
+          🔔 Attention! ! ! To all HGNICE, Curently our customer service only use LIVE CHAT WE
+        </div>
+        <button
+          type="button"
+          onClick={() => alert('HGNICE অফিসিয়াল কাস্টমার সার্ভিসের সাথে যোগাযোগ করতে লাইভ চ্যাটে ক্লিক করুন।')}
+          className="bg-transparent text-[#f15252] border border-[#f15252] px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer hover:bg-red-50"
+        >
+          🔥 Detail
+        </button>
+      </div>
+
+      {/* 4. Game Modes Tab (4 Modes: 30sec, 1 Min, 3 Min, 5 Min) */}
+      <div className="grid grid-cols-4 gap-1.5 px-3 mb-3">
+        {[
+          { sec: 30, label: 'WinGo 30sec' },
+          { sec: 60, label: 'WinGo 1 Min' },
+          { sec: 180, label: 'WinGo 3 Min' },
+          { sec: 300, label: 'WinGo 5 Min' },
+        ].map((mode) => {
+          const isActive = durationSec === mode.sec;
+          return (
+            <button
+              key={mode.sec}
+              type="button"
+              onClick={() => {
+                sound.playClick();
+                setDurationSec(mode.sec);
+                setSyncState(getRealtimeWinGo(mode.sec));
+              }}
+              className={`p-2 rounded-xl text-center cursor-pointer flex flex-col items-center justify-center transition-all border ${
+                isActive
+                  ? 'bg-[#f15252] text-white border-[#f15252] shadow-md scale-102 font-bold'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <img
+                src={isActive ? WINGO_ASSETS.timeActive : WINGO_ASSETS.timeInactive}
+                alt="Time"
+                className="w-5 h-5 object-contain mb-1"
+                referrerPolicy="no-referrer"
+              />
+              <span className="text-[10px] font-bold leading-tight line-clamp-1">{mode.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 5. Control Panel (The Market Stage with 5 Fast Results on Left & Time on Right) */}
+      <div
+        className="mx-3 mb-3 p-4 rounded-2xl text-white shadow relative overflow-hidden bg-cover bg-center"
+        style={{ backgroundImage: `url(${WINGO_ASSETS.gameMiniBg})` }}
+      >
+        <div className="flex justify-between items-center">
+          {/* Left: How to play & Top 5 Fast Recent Balls */}
+          <div>
+            <button
+              type="button"
+              onClick={() => alert('Win Go খেলার নিয়মাবলী:\n১. কালার (Green, Violet, Red), সংখ্যা (০-৯) বা Big/Small-এ বাজি ধরুন।\n২. সংখ্যা মিললে ৯ গুণ পেআউট!\n৩. Big (৫-৯) বা Small (০-৪) মিললে দ্বিগুণ পেআউট!\n৪. শেষ ৫ সেকেন্ডে বাজি লক থাকবে।')}
+              className="border border-white/90 text-white bg-white/10 hover:bg-white/20 px-2.5 py-0.5 rounded-full text-[11px] font-bold cursor-pointer transition-colors"
+            >
+              📖 How to play
+            </button>
+
+            {/* Top 5 Fast Draw Results */}
+            <div className="flex items-center gap-1 mt-2.5">
+              {syncState.history.slice(0, 5).map((draw, idx) => (
+                <div key={`${draw.period}-${idx}`} className="flex flex-col items-center">
+                  <img
+                    src={WINGO_ASSETS.balls[draw.number] || getBallImage(draw.number)}
+                    alt={`Ball ${draw.number}`}
+                    className="w-6 h-6 object-contain drop-shadow hover:scale-110 transition-transform"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Right: Time Remaining & Flip Clock & Period */}
+          <div className="text-right">
+            <div className="text-[10px] text-white/90 mb-1 font-semibold">Time remaining</div>
+            <div className="flex items-center justify-end gap-1">
+              <span className="bg-white/95 text-[#f15252] px-1.5 py-0.5 rounded text-sm font-black font-mono shadow-sm">
+                {digits.m1}
+              </span>
+              <span className="bg-white/95 text-[#f15252] px-1.5 py-0.5 rounded text-sm font-black font-mono shadow-sm">
+                {digits.m2}
+              </span>
+              <span className="text-white font-bold text-sm px-0.5">:</span>
+              <span className="bg-white/95 text-[#f15252] px-1.5 py-0.5 rounded text-sm font-black font-mono shadow-sm">
+                {digits.s1}
+              </span>
+              <span className="bg-white/95 text-[#f15252] px-1.5 py-0.5 rounded text-sm font-black font-mono shadow-sm">
+                {digits.s2}
+              </span>
+            </div>
+            <div className="text-[10px] text-white/90 font-mono font-bold mt-1.5">
+              {syncState.period}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 6. Color Betting Buttons (Green, Violet, Red) */}
+      <div className="flex gap-2 px-3 mb-3">
+        <button
+          type="button"
+          disabled={syncState.isFreeze}
+          onClick={() => handleOpenBet('color', 'Green')}
+          className="flex-1 h-12 rounded-lg text-white font-bold text-sm shadow-md cursor-pointer transition-all active:scale-95 bg-cover bg-center disabled:opacity-50 flex items-center justify-center"
+          style={{ backgroundImage: `url(${WINGO_ASSETS.borderGreen})` }}
+        >
+          Green
+        </button>
+        <button
+          type="button"
+          disabled={syncState.isFreeze}
+          onClick={() => handleOpenBet('color', 'Violet')}
+          className="flex-1 h-12 rounded-lg text-white font-bold text-sm shadow-md cursor-pointer transition-all active:scale-95 bg-cover bg-center disabled:opacity-50 flex items-center justify-center"
+          style={{ backgroundImage: `url(${WINGO_ASSETS.borderViolet})` }}
+        >
+          Violet
+        </button>
+        <button
+          type="button"
+          disabled={syncState.isFreeze}
+          onClick={() => handleOpenBet('color', 'Red')}
+          className="flex-1 h-12 rounded-lg text-white font-bold text-sm shadow-md cursor-pointer transition-all active:scale-95 bg-cover bg-center disabled:opacity-50 flex items-center justify-center"
+          style={{ backgroundImage: `url(${WINGO_ASSETS.borderRed})` }}
+        >
+          Red
+        </button>
+      </div>
+
+      {/* 7. Number Grid (0-9 with Authentic Glossy Balls) */}
+      <div className="grid grid-cols-5 gap-2 px-3 mb-3">
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
           <button
-            key={dur}
+            key={num}
             type="button"
-            onClick={() => {
-              sound.playClick();
-              setDurationSec(dur);
-              setSyncState(getRealtimeWinGo(dur));
-            }}
-            className={`flex-1 max-w-[90px] py-2 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer text-center ${
-              durationSec === dur
-                ? 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600 text-slate-950 font-black shadow-lg ring-1 ring-yellow-300'
-                : 'text-slate-400 hover:text-white bg-[#060e22]'
-            }`}
+            disabled={syncState.isFreeze}
+            onClick={() => handleOpenBet('number', num.toString())}
+            className="aspect-square flex items-center justify-center cursor-pointer transition-all active:scale-90 hover:scale-105 disabled:opacity-50 bg-transparent p-0 border-0"
           >
-            {durationLabel(dur)}
+            <img
+              src={WINGO_ASSETS.balls[num] || getBallImage(num)}
+              alt={`Ball ${num}`}
+              className="w-full h-full object-contain drop-shadow"
+              referrerPolicy="no-referrer"
+            />
           </button>
         ))}
       </div>
 
-      {/* Market Board: Live Period, Countdown Timer & Last Draw Ball */}
-      <div className="rounded-3xl bg-gradient-to-r from-[#0d1f48] via-[#091533] to-[#0b193d] border border-blue-500/40 p-4 sm:p-5 shadow-2xl relative overflow-hidden">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 relative z-10">
-          {/* Period Info */}
-          <div className="flex items-center justify-between sm:justify-start gap-4 w-full sm:w-auto">
-            <div>
-              <div className="flex items-center gap-1.5 text-xs text-sky-300 font-bold uppercase">
-                <Clock className="w-4 h-4 text-amber-400" />
-                <span>বর্তমান পিরিয়ড</span>
-                <span className="bg-emerald-500/20 text-emerald-300 text-[10px] px-1.5 py-0.2 rounded border border-emerald-500/40 font-mono">
-                  LIVE
-                </span>
-              </div>
-              <div className="text-xl sm:text-2xl font-black font-mono text-amber-400 mt-0.5 tracking-tight">
-                {syncState.period}
-              </div>
-            </div>
-
-            {/* Last Round Result Ball */}
-            {syncState.latestDraw && (
-              <div className="flex items-center gap-2 bg-[#040918]/90 px-3 py-1.5 rounded-2xl border border-blue-500/30">
-                <span className="text-[10px] text-slate-400 font-bold uppercase">পূর্ববর্তী:</span>
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm font-mono shadow-md ${getBallClass(
-                    syncState.latestDraw.number,
-                    syncState.latestDraw.color
-                  )}`}
-                >
-                  {syncState.latestDraw.number}
-                </div>
-                <span className="text-xs font-bold text-slate-200 uppercase">
-                  {syncState.latestDraw.size === 'big' ? 'বিগ' : 'স্মল'}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Live Seconds Countdown Display */}
-          <div className="flex flex-col items-center sm:items-end w-full sm:w-auto">
-            <span className="text-[11px] font-bold uppercase text-slate-300">
-              অবশিষ্ট সেকেন্ড
-            </span>
-            <div
-              className={`font-mono text-3xl sm:text-4xl font-black tracking-widest px-4 py-1.5 rounded-2xl border shadow-xl ${
-                syncState.isFreeze
-                  ? 'bg-red-950/80 border-red-500 text-red-400 animate-pulse shadow-[0_0_25px_rgba(239,68,68,0.6)]'
-                  : 'bg-[#040918] border-amber-500/50 text-amber-400'
-              }`}
-            >
-              {formatSeconds(syncState.timeLeft)}
-            </div>
-          </div>
-        </div>
-
-        {/* 5-Second Freeze Notice */}
-        {syncState.isFreeze && (
-          <div className="mt-3 py-1.5 px-3 rounded-xl bg-red-600/25 border border-red-500/50 text-red-300 text-xs font-bold text-center animate-pulse">
-            ⚠️ সময় শেষ! পিরিয়ড {syncState.period}-এর ড্র ফলাফল ঘোষণা হচ্ছে...
-          </div>
-        )}
+      {/* 8. Big & Small Buttons */}
+      <div className="flex px-3 mb-4">
+        <button
+          type="button"
+          disabled={syncState.isFreeze}
+          onClick={() => handleOpenBet('size', 'Big')}
+          className="flex-1 py-3 bg-[#b35c1e] hover:bg-[#a05118] text-white font-bold text-sm rounded-l-full shadow-md cursor-pointer transition-all active:scale-98 disabled:opacity-50 flex items-center justify-center"
+        >
+          Big
+        </button>
+        <button
+          type="button"
+          disabled={syncState.isFreeze}
+          onClick={() => handleOpenBet('size', 'Small')}
+          className="flex-1 py-3 bg-[#2b4c7e] hover:bg-[#233f69] text-white font-bold text-sm rounded-r-full shadow-md cursor-pointer transition-all active:scale-98 disabled:opacity-50 flex items-center justify-center"
+        >
+          Small
+        </button>
       </div>
 
-      {/* Primary Betting Arena */}
-      <div className="rounded-3xl bg-[#0a1738] border border-blue-500/25 p-4 sm:p-5 shadow-2xl space-y-4">
-        {/* Colors (Green x2, Violet x4.5, Red x2) */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-4">
+      {/* 9. Table Section (Game History 10 Results, Chart, My Bets) */}
+      <div className="bg-white mx-3 rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-3">
+        {/* Table Tabs */}
+        <div className="flex border-b border-slate-200 bg-slate-50/50">
           <button
             type="button"
-            id="bet-green-btn"
-            disabled={syncState.isFreeze}
-            onClick={() => handleOpenBet('color', 'green')}
-            className="py-3.5 sm:py-4 px-2 rounded-2xl bg-gradient-to-b from-emerald-500 to-emerald-700 hover:from-emerald-400 hover:to-emerald-600 text-white font-black text-sm sm:text-base shadow-lg shadow-emerald-950/50 border border-emerald-400/40 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none cursor-pointer flex flex-col items-center justify-center"
+            onClick={() => setActiveTab('history')}
+            className={`flex-1 py-2.5 text-center text-xs font-bold cursor-pointer transition-colors ${
+              activeTab === 'history'
+                ? 'text-[#f15252] border-b-2 border-[#f15252] bg-white'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
           >
-            <span className="tracking-wide">সবুজ (Green)</span>
-            <span className="text-[10px] sm:text-xs font-mono font-semibold text-emerald-100 opacity-90">
-              x2 মাল্টিপ্লায়ার
-            </span>
+            Game history
           </button>
-
           <button
             type="button"
-            id="bet-violet-btn"
-            disabled={syncState.isFreeze}
-            onClick={() => handleOpenBet('color', 'violet')}
-            className="py-3.5 sm:py-4 px-2 rounded-2xl bg-gradient-to-b from-purple-500 to-purple-700 hover:from-purple-400 hover:to-purple-600 text-white font-black text-sm sm:text-base shadow-lg shadow-purple-950/50 border border-purple-400/40 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none cursor-pointer flex flex-col items-center justify-center"
+            onClick={() => setActiveTab('chart')}
+            className={`flex-1 py-2.5 text-center text-xs font-bold cursor-pointer transition-colors ${
+              activeTab === 'chart'
+                ? 'text-[#f15252] border-b-2 border-[#f15252] bg-white'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
           >
-            <span className="tracking-wide">বেগুনী (Violet)</span>
-            <span className="text-[10px] sm:text-xs font-mono font-semibold text-purple-100 opacity-90">
-              x4.5 মাল্টিপ্লায়ার
-            </span>
+            Chart
           </button>
-
           <button
             type="button"
-            id="bet-red-btn"
-            disabled={syncState.isFreeze}
-            onClick={() => handleOpenBet('color', 'red')}
-            className="py-3.5 sm:py-4 px-2 rounded-2xl bg-gradient-to-b from-red-500 to-red-700 hover:from-red-400 hover:to-red-600 text-white font-black text-sm sm:text-base shadow-lg shadow-red-950/50 border border-red-400/40 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none cursor-pointer flex flex-col items-center justify-center"
+            onClick={() => setActiveTab('mybets')}
+            className={`flex-1 py-2.5 text-center text-xs font-bold cursor-pointer transition-colors ${
+              activeTab === 'mybets'
+                ? 'text-[#f15252] border-b-2 border-[#f15252] bg-white'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
           >
-            <span className="tracking-wide">লাল (Red)</span>
-            <span className="text-[10px] sm:text-xs font-mono font-semibold text-red-100 opacity-90">
-              x2 মাল্টিপ্লায়ার
-            </span>
+            My Bets ({myBets.length})
           </button>
         </div>
 
-        {/* 0 - 9 Numbers (Multiplier 9x!) */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-slate-300 font-semibold px-1">
-            <span>সংখ্যা নির্বাচন (০-৯)</span>
-            <span className="text-amber-400 font-bold font-mono">৯ গুণ পেআউট (9X Multiplier)</span>
-          </div>
-
-          <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
-            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
-              const ballColorClass = getBallClass(num);
-              return (
-                <button
-                  key={num}
-                  type="button"
-                  id={`bet-num-btn-${num}`}
-                  disabled={syncState.isFreeze}
-                  onClick={() => handleOpenBet('number', num.toString())}
-                  className={`aspect-square rounded-2xl flex flex-col items-center justify-center font-mono font-black text-lg sm:text-xl shadow-md transition-all active:scale-90 disabled:opacity-40 disabled:pointer-events-none hover:scale-105 cursor-pointer border border-white/20 ${ballColorClass}`}
-                >
-                  <span>{num}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Big (5-9) & Small (0-4) */}
-        <div className="grid grid-cols-2 gap-3 pt-1">
-          <button
-            type="button"
-            id="bet-big-btn"
-            disabled={syncState.isFreeze}
-            onClick={() => handleOpenBet('size', 'big')}
-            className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-extrabold text-sm sm:text-base shadow-md border border-amber-400/40 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-between cursor-pointer"
-          >
-            <span>বিগ / Big (৫-৯)</span>
-            <span className="font-mono text-xs text-amber-200">x2.0</span>
-          </button>
-
-          <button
-            type="button"
-            id="bet-small-btn"
-            disabled={syncState.isFreeze}
-            onClick={() => handleOpenBet('size', 'small')}
-            className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-extrabold text-sm sm:text-base shadow-md border border-blue-400/40 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-between cursor-pointer"
-          >
-            <span>স্মল / Small (০-৪)</span>
-            <span className="font-mono text-xs text-blue-200">x2.0</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Tabs: Game History / Chart Trend / My Bets */}
-      <div className="rounded-3xl bg-[#0a1738] border border-blue-500/25 p-4 sm:p-5 shadow-xl space-y-4">
-        <div className="flex items-center justify-between border-b border-blue-900/50 pb-3 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              id="wingo-tab-history"
-              onClick={() => setActiveTab('history')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'history'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <History className="w-3.5 h-3.5" />
-              <span>লাস্ট ১০টি ড্র হিস্ট্রি</span>
-            </button>
-
-            <button
-              type="button"
-              id="wingo-tab-chart"
-              onClick={() => setActiveTab('chart')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'chart'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              <span>ট্রেন্ড চার্ট</span>
-            </button>
-
-            <button
-              type="button"
-              id="wingo-tab-mybets"
-              onClick={() => setActiveTab('mybets')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'mybets'
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              <span>আমার বেট ({myBets.length})</span>
-            </button>
-          </div>
-
-          {/* Dedicated Calendar / History Page Icon Button */}
-          <button
-            type="button"
-            onClick={() => {
-              sound.playClick();
-              setShowHistoryModal(true);
-            }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-400/30 text-xs font-bold transition-all cursor-pointer"
-            title="দিনের সমস্ত ড্র ফলাফল দেখুন"
-          >
-            <Calendar className="w-3.5 h-3.5 text-amber-400" />
-            <span>আরও রেজাল্ট (দিন রেকর্ড)</span>
-            <ExternalLink className="w-3 h-3 text-amber-400/80" />
-          </button>
-        </div>
-
-        {/* Tab 1: Game History Table */}
+        {/* Tab 1: Game History (Exactly 10 Rows) */}
         {activeTab === 'history' && (
-          <div className="space-y-3">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead>
-                  <tr className="text-slate-400 border-b border-blue-900/40 text-[11px] uppercase">
-                    <th className="py-2 px-3 font-semibold">পিরিয়ড</th>
-                    <th className="py-2 px-3 font-semibold text-center">সংখ্যা</th>
-                    <th className="py-2 px-3 font-semibold text-center">সাইজ</th>
-                    <th className="py-2 px-3 font-semibold text-right">কালার</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-blue-900/20">
-                  {syncState.history.slice(0, 10).map((row) => (
-                    <tr key={row.period} className="hover:bg-blue-950/40 transition-colors">
-                      <td className="py-2.5 px-3 font-mono font-bold text-slate-300">
+          <div>
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-[#f15252] text-white text-[11px]">
+                  <th className="py-2 px-2.5 text-center font-bold">Period</th>
+                  <th className="py-2 px-2 text-center font-bold">Number</th>
+                  <th className="py-2 px-2 text-center font-bold">Big Small</th>
+                  <th className="py-2 px-2 text-center font-bold">Color</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {syncState.history.slice(0, 10).map((row) => {
+                  const isZero = row.number === 0;
+                  const isFive = row.number === 5;
+                  const isGreen = [1, 3, 7, 9].includes(row.number);
+
+                  return (
+                    <tr key={row.period} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-2.5 px-2 text-center font-bold text-slate-700 font-mono text-[11px]">
                         {row.period}
                       </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span
-                          className={`inline-flex w-6 h-6 rounded-full items-center justify-center font-bold text-xs font-mono shadow-sm ${getBallClass(
-                            row.number,
-                            row.color
-                          )}`}
-                        >
-                          {row.number}
-                        </span>
+                      <td className="py-2.5 px-2 text-center font-bold text-sm">
+                        {isZero ? (
+                          <span className="bg-gradient-to-r from-[#e74c3c] to-[#9b59b6] bg-clip-text text-transparent font-black">
+                            0
+                          </span>
+                        ) : isFive ? (
+                          <span className="bg-gradient-to-r from-[#2ecc71] to-[#9b59b6] bg-clip-text text-transparent font-black">
+                            5
+                          </span>
+                        ) : isGreen ? (
+                          <span className="text-[#2ecc71] font-black">{row.number}</span>
+                        ) : (
+                          <span className="text-[#e74c3c] font-black">{row.number}</span>
+                        )}
                       </td>
-                      <td className="py-2.5 px-3 text-center">
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                            row.size === 'big'
-                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                              : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
-                          }`}
-                        >
-                          {row.size === 'big' ? 'বিগ' : 'স্মল'}
-                        </span>
+                      <td className="py-2.5 px-2 text-center font-semibold text-slate-600">
+                        {row.size === 'big' ? 'Big' : 'Small'}
                       </td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {row.color === 'green' && (
-                            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 shadow-sm" title="সবুজ" />
-                          )}
-                          {row.color === 'red' && (
-                            <span className="w-3.5 h-3.5 rounded-full bg-red-500 shadow-sm" title="লাল" />
-                          )}
-                          {row.color === 'green-violet' && (
-                            <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-emerald-500 to-purple-500 shadow-sm" title="সবুজ + বেগুনী" />
-                          )}
-                          {row.color === 'red-violet' && (
-                            <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-r from-red-500 to-purple-500 shadow-sm" title="লাল + বেগুনী" />
+                      <td className="py-2.5 px-2 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          {isZero ? (
+                            <>
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#e74c3c] inline-block" />
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#9b59b6] inline-block" />
+                            </>
+                          ) : isFive ? (
+                            <>
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#2ecc71] inline-block" />
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#9b59b6] inline-block" />
+                            </>
+                          ) : isGreen ? (
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#2ecc71] inline-block" />
+                          ) : (
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#e74c3c] inline-block" />
                           )}
                         </div>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  );
+                })}
+              </tbody>
+            </table>
 
-            {/* Bottom Button to view more historical pages */}
-            <div className="pt-2 flex justify-center border-t border-blue-900/30">
+            {/* Pagination bar & Button to open full records */}
+            <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 border-t border-slate-100 text-xs">
               <button
                 type="button"
                 onClick={() => {
                   sound.playClick();
                   setShowHistoryModal(true);
                 }}
-                className="w-full py-2.5 px-4 rounded-xl bg-[#060e22] hover:bg-blue-900/40 border border-blue-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+                className="px-3 py-1 rounded bg-[#eaeaea] hover:bg-slate-300 text-slate-700 font-bold cursor-pointer"
               >
-                <Calendar className="w-4 h-4 text-amber-400" />
-                <span>আরও বিগত ড্র ফলাফল ও পৃষ্ঠা দেখতে এখানে ক্লিক করুন</span>
-                <ExternalLink className="w-3.5 h-3.5" />
+                ◁ পূর্ববর্তী
+              </button>
+              <span className="text-slate-500 font-bold font-mono">1/50</span>
+              <button
+                type="button"
+                onClick={() => {
+                  sound.playClick();
+                  setShowHistoryModal(true);
+                }}
+                className="px-3 py-1 rounded bg-[#f15252] hover:bg-[#e04545] text-white font-bold cursor-pointer"
+              >
+                পরবর্তী ▷
               </button>
             </div>
           </div>
         )}
 
-        {/* Tab 2: Chart Trend */}
+        {/* Tab 2: Chart */}
         {activeTab === 'chart' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>সংখ্যা পুনরাবৃত্তি ফ্রিকোয়েন্সি (সাম্প্রতিক ২৫ রাউন্ড)</span>
-              <span className="text-sky-400 font-mono">০ থেকে ৯ বণ্টন</span>
+          <div className="p-3 space-y-2">
+            <div className="text-[11px] text-slate-500 font-medium">
+              ফ্রিকোয়েন্সি বণ্টন (Frequency 0-9)
             </div>
-
-            <div className="p-3 rounded-2xl bg-[#08122c] border border-blue-500/20 flex items-end justify-between gap-1 h-32">
+            <div className="flex items-end justify-between gap-1 h-28 bg-slate-50 p-2 rounded-xl border border-slate-100">
               {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
                 const count = syncState.history.filter((h) => h.number === num).length;
-                const heightPercent = Math.max((count / 6) * 100, 15);
+                const heightPercent = Math.max((count / 5) * 100, 12);
                 return (
-                  <div key={num} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
-                    <span className="text-[10px] font-mono text-slate-400">{count}</span>
+                  <div key={num} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+                    <span className="text-[9px] font-mono text-slate-500">{count}</span>
                     <div
                       style={{ height: `${heightPercent}%` }}
-                      className={`w-full rounded-t-md transition-all ${
-                        count > 0 ? 'bg-gradient-to-t from-blue-600 to-amber-400' : 'bg-blue-950'
-                      }`}
+                      className="w-full rounded-t bg-[#f15252] transition-all"
                     />
-                    <span className="text-xs font-bold font-mono text-slate-300">{num}</span>
+                    <span className="text-[10px] font-bold font-mono text-slate-700">{num}</span>
                   </div>
                 );
               })}
@@ -635,58 +685,47 @@ export function WinGoGame({
           </div>
         )}
 
-        {/* Tab 3: My Bets Record */}
+        {/* Tab 3: My Bets */}
         {activeTab === 'mybets' && (
-          <div className="space-y-2">
+          <div className="p-3 space-y-2">
             {myBets.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 text-xs">
-                কোনো বেট রেকর্ড নেই। উপরে আপনার বেট নির্বাচন করুন।
+              <div className="py-6 text-center text-slate-400 text-xs">
+                কোনো বেট রেকর্ড নেই। উপরে বাজি নির্বাচন করুন।
               </div>
             ) : (
               myBets.map((bet) => (
                 <div
                   key={bet.id}
-                  className="p-3 rounded-2xl bg-[#08122c] border border-blue-500/20 flex items-center justify-between gap-2 text-xs"
+                  className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
                 >
                   <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-slate-200">
-                        পিরিয়ড {bet.period}
-                      </span>
-                      <span className="text-slate-400">({bet.time})</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-bold text-slate-800">{bet.period}</span>
+                      <span className="text-[10px] text-slate-400">({bet.time})</span>
                     </div>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <span className="text-slate-400">বেট:</span>
-                      <span className="px-1.5 py-0.2 rounded font-bold uppercase bg-blue-900/60 text-amber-300 border border-blue-500/30">
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="px-1.5 py-0.2 rounded bg-red-100 text-[#f15252] font-bold uppercase text-[10px]">
                         {bet.selection}
                       </span>
-                      <span className="text-slate-400">পরিমাণ:</span>
-                      <span className="font-mono text-slate-200">
-                        {getSymbol(currency)}{bet.totalStake}
+                      <span className="text-slate-600 font-mono font-bold">
+                        {sym}{bet.totalStake.toFixed(2)}
                       </span>
                     </div>
                   </div>
 
                   <div className="text-right">
                     {bet.status === 'pending' && (
-                      <span className="px-2 py-1 rounded-md bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                      <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-bold text-[10px]">
                         পেন্ডিং
                       </span>
                     )}
                     {bet.status === 'won' && (
-                      <div className="flex flex-col items-end">
-                        <span className="flex items-center gap-1 text-emerald-400 font-bold">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> জয়ী
-                        </span>
-                        <span className="font-mono font-bold text-emerald-400">
-                          +{getSymbol(currency)}{bet.winAmount?.toFixed(2)}
-                        </span>
-                      </div>
+                      <span className="text-[#2ecc71] font-bold font-mono text-xs">
+                        +{sym}{bet.winAmount?.toFixed(2)}
+                      </span>
                     )}
                     {bet.status === 'lost' && (
-                      <span className="flex items-center gap-1 text-red-400 font-bold">
-                        <XCircle className="w-3.5 h-3.5" /> পরাজয়
-                      </span>
+                      <span className="text-red-500 font-bold text-[10px]">পরাজয়</span>
                     )}
                   </div>
                 </div>
@@ -696,137 +735,192 @@ export function WinGoGame({
         )}
       </div>
 
-      {/* Place Bet Dialog Modal */}
-      {showBetDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
-          <div className="w-full max-w-sm rounded-3xl bg-[#0c1b3d] border border-blue-500/40 p-5 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-blue-900/60 pb-2">
-              <span className="text-sm font-bold text-white flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>বেট কনফার্ম করুন - Win Go {durationLabel(durationSec)}</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowBetDialog(false)}
-                className="text-slate-400 hover:text-white text-xs"
-              >
-                ✕
-              </button>
+      {/* 10. Countdown 5-Second Freeze Overlay (Exactly as in Reference HTML) */}
+      {syncState.isFreeze && (
+        <div className="absolute inset-0 bg-black/60 z-40 flex items-center justify-center animate-in fade-in">
+          <div className="flex gap-3">
+            <div className="bg-white w-24 h-36 sm:w-28 sm:h-44 rounded-2xl flex items-center justify-center text-8xl sm:text-9xl font-black text-[#ff5b5b] shadow-2xl">
+              0
             </div>
-
-            <div className="p-3 rounded-2xl bg-[#08122c] border border-blue-500/20 flex items-center justify-between">
-              <span className="text-xs text-slate-300">নির্বাচিত অপশন:</span>
-              <span className="text-sm font-extrabold uppercase font-mono px-3 py-0.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-400/40">
-                {selectedBetValue}
-              </span>
-            </div>
-
-            <div className="space-y-1.5">
-              <span className="text-xs text-slate-400">পরিমাণ নির্ধারণ</span>
-              <div className="grid grid-cols-5 gap-1.5">
-                {[10, 50, 100, 500, 1000].map((amt) => (
-                  <button
-                    key={amt}
-                    type="button"
-                    onClick={() => {
-                      sound.playChip();
-                      setChipAmount(amt);
-                    }}
-                    className={`py-2 rounded-xl text-xs font-mono font-bold transition-all ${
-                      chipAmount === amt
-                        ? 'bg-amber-500 text-slate-950 font-black shadow-md'
-                        : 'bg-[#112450] text-slate-300 hover:bg-blue-900/50'
-                    }`}
-                  >
-                    {amt}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <span className="text-xs text-slate-400">গুণক সংখ্যা (Multiplier)</span>
-              <div className="grid grid-cols-5 gap-1.5">
-                {[1, 5, 10, 20, 50].map((mul) => (
-                  <button
-                    key={mul}
-                    type="button"
-                    onClick={() => {
-                      sound.playClick();
-                      setChipMultiplier(mul);
-                    }}
-                    className={`py-2 rounded-xl text-xs font-mono font-bold transition-all ${
-                      chipMultiplier === mul
-                        ? 'bg-emerald-500 text-white font-black shadow-md'
-                        : 'bg-[#112450] text-slate-300 hover:bg-blue-900/50'
-                    }`}
-                  >
-                    X{mul}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-blue-900/40 flex items-center justify-between text-xs">
-              <span className="text-slate-300">মোট বেট পরিমাণ:</span>
-              <span className="text-base font-black font-mono text-amber-400">
-                {getSymbol(currency)}{(chipAmount * chipMultiplier).toLocaleString()}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowBetDialog(false)}
-                className="py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
-              >
-                বাতিল
-              </button>
-              <button
-                type="button"
-                id="confirm-place-bet-btn"
-                onClick={handlePlaceBet}
-                className="py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600 hover:brightness-110 text-slate-950 text-xs font-black shadow-lg shadow-amber-950/50 cursor-pointer"
-              >
-                বেট প্লেস করুন
-              </button>
+            <div className="bg-white w-24 h-36 sm:w-28 sm:h-44 rounded-2xl flex items-center justify-center text-8xl sm:text-9xl font-black text-[#ff5b5b] shadow-2xl">
+              {syncState.timeLeft}
             </div>
           </div>
         </div>
       )}
 
-      {/* Round Result Alert Modal */}
-      {winModalData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in zoom-in-95">
-          <div className="w-full max-w-xs rounded-3xl bg-[#0b1736] border border-blue-500/50 p-5 text-center shadow-2xl space-y-3">
-            <div className="text-3xl">
-              {winModalData.win ? '🎉' : '🎲'}
-            </div>
-            <h3 className="text-lg font-black text-white font-display">
-              {winModalData.win ? 'অভিনন্দন! আপনি জিতেছেন!' : 'রাউন্ড সম্পন্ন'}
-            </h3>
-            <p className="text-xs text-slate-300">
-              পিরিয়ড {winModalData.period}-এর ড্র ফলাফল: <span className="font-bold text-amber-300 font-mono text-sm">সংখ্যা {winModalData.num}</span>
-            </p>
-
-            {winModalData.win && (
-              <div className="py-2 px-3 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xl">
-                +{getSymbol(currency)}{winModalData.amount.toFixed(2)}
+      {/* 11. Betting Drawer (Screenshot 1 / HTML Drawer Reference) */}
+      {showBetDialog && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/50 backdrop-blur-[1px] animate-in fade-in">
+          <div className="bg-white rounded-t-3xl shadow-2xl w-full max-w-[480px] mx-auto pb-4 animate-in slide-in-from-bottom duration-200 overflow-hidden">
+            {/* Drawer Header */}
+            <div className="bg-[#ffa84c] text-white p-3.5 text-center relative">
+              <div className="text-sm font-bold mb-1.5">{durationName(durationSec)}</div>
+              <div className="bg-white text-slate-800 px-4 py-1.5 rounded-lg inline-block text-xs font-bold shadow-sm min-w-[150px]">
+                Select {selectedBetValue}
               </div>
-            )}
+            </div>
 
+            {/* Drawer Body */}
+            <div className="p-4 space-y-3.5">
+              {/* Balance Unit Selector */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">Balance</span>
+                <div className="flex gap-1.5">
+                  {[1, 10, 100, 1000].map((unit) => (
+                    <button
+                      key={unit}
+                      type="button"
+                      onClick={() => {
+                        sound.playChip();
+                        setChipAmount(unit);
+                      }}
+                      className={`px-3 py-1.5 rounded text-xs font-bold cursor-pointer transition-all ${
+                        chipAmount === unit
+                          ? 'bg-[#ffa84c] text-white shadow-sm'
+                          : 'bg-[#f5f5f5] text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {unit}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quantity Selector */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">Quantity</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.playClick();
+                      if (betQuantity > 1) setBetQuantity((q) => q - 1);
+                    }}
+                    className="w-7 h-7 rounded bg-[#ffa84c] hover:bg-[#f39c38] text-white font-bold flex items-center justify-center cursor-pointer active:scale-90"
+                  >
+                    -
+                  </button>
+                  <input
+                    type="number"
+                    readOnly
+                    value={betQuantity}
+                    className="w-12 text-center border border-slate-200 rounded py-1 text-xs font-bold text-slate-800 bg-slate-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.playClick();
+                      setBetQuantity((q) => q + 1);
+                    }}
+                    className="w-7 h-7 rounded bg-[#ffa84c] hover:bg-[#f39c38] text-white font-bold flex items-center justify-center cursor-pointer active:scale-90"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* Multiplier Selector */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">Multiplier</span>
+                <div className="flex gap-1 overflow-x-auto">
+                  {[1, 5, 10, 20, 50, 100].map((mul) => (
+                    <button
+                      key={mul}
+                      type="button"
+                      onClick={() => {
+                        sound.playClick();
+                        setChipMultiplier(mul);
+                      }}
+                      className={`px-2 py-1 rounded text-xs font-bold cursor-pointer transition-all ${
+                        chipMultiplier === mul
+                          ? 'bg-[#ffa84c] text-white shadow-sm'
+                          : 'bg-[#f5f5f5] text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      X{mul}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Agreement */}
+              <div
+                className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer"
+                onClick={() => setAgreeRules(!agreeRules)}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center text-[10px] text-white transition-colors ${
+                    agreeRules ? 'bg-[#ffa84c] border-[#ffa84c]' : 'border-slate-300'
+                  }`}
+                >
+                  {agreeRules && '✓'}
+                </div>
+                <span>I agree 《Pre-sale rules》</span>
+              </div>
+
+              {/* Footer Actions */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowBetDialog(false)}
+                  className="flex-1 py-2.5 rounded-lg bg-[#eaeaea] hover:bg-slate-300 text-slate-700 font-bold text-sm cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePlaceBet}
+                  className="flex-1 py-2.5 rounded-lg bg-[#ffa84c] hover:bg-[#f39c38] text-white font-bold text-sm shadow-md cursor-pointer transition-all active:scale-98"
+                >
+                  Total amount {sym}{totalBetAmount.toFixed(2)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 12. Congratulations Popup (Screenshot 2 / HTML Rocket Popup) */}
+      {winModalData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-[1px] animate-in fade-in">
+          <div className="bg-gradient-to-br from-[#ff6b6b] to-[#ff8e53] w-[310px] p-5 rounded-3xl text-center text-white relative shadow-2xl animate-in zoom-in duration-200">
+            {/* Rocket Badge */}
+            <div className="w-20 h-20 bg-[#f7d070] rounded-full flex items-center justify-center -mt-14 mx-auto border-4 border-white shadow-lg text-4xl">
+              🚀
+            </div>
+
+            <div className="text-2xl font-black mt-2 mb-3 tracking-wide">Congratulations</div>
+
+            {/* Receipt Box */}
+            <div className="bg-white rounded-2xl p-4 text-slate-800 shadow-inner text-center">
+              <div className="text-xs font-bold text-[#e74c3c] mb-0.5">Bonus</div>
+              <div className="text-2xl font-black text-[#e74c3c] font-mono mb-2">
+                {sym}{winModalData.amount.toFixed(2)}
+              </div>
+              <div className="text-[11px] text-slate-500 font-medium">
+                Period: {durationName(durationSec)}
+              </div>
+              <div className="text-[11px] text-slate-500 font-mono font-bold">
+                {winModalData.period}
+              </div>
+            </div>
+
+            <div className="text-[11px] text-white/80 mt-3">3 seconds auto close</div>
+
+            {/* Close Circle Button */}
             <button
               type="button"
               onClick={() => setWinModalData(null)}
-              className="w-full py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs"
+              className="absolute -bottom-12 left-1/2 -translate-x-1/2 w-9 h-9 rounded-full border-2 border-white text-white flex items-center justify-center text-base cursor-pointer hover:bg-white/20 transition-colors"
             >
-              খেলা চালিয়ে যান
+              ✕
             </button>
           </div>
         </div>
       )}
 
-      {/* Full Draw History Paginated Modal Page */}
+      {/* 13. Full History Modal */}
       {showHistoryModal && (
         <WinGoHistoryModal
           isOpen={showHistoryModal}

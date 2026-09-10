@@ -3,6 +3,7 @@ import { X, ChevronLeft, ChevronRight, Calendar, Sparkles, RefreshCw } from 'luc
 import { Currency } from '../types';
 import { getWinGoPaginatedHistory } from '../utils/gameSync';
 import { sound } from '../utils/audio';
+import { getBallImage } from '../utils/wingoAssets';
 
 interface WinGoHistoryModalProps {
   isOpen: boolean;
@@ -103,14 +104,12 @@ export function WinGoHistoryModal({
                       {row.period}
                     </td>
                     <td className="py-2.5 px-3 text-center">
-                      <span
-                        className={`inline-flex w-6 h-6 rounded-full items-center justify-center font-bold text-xs font-mono shadow-sm ${getBallClass(
-                          row.number,
-                          row.color
-                        )}`}
-                      >
-                        {row.number}
-                      </span>
+                      <img
+                        src={getBallImage(row.number)}
+                        alt={`Ball ${row.number}`}
+                        className="w-6 h-6 sm:w-7 sm:h-7 object-contain inline-block drop-shadow-sm"
+                        referrerPolicy="no-referrer"
+                      />
                     </td>
                     <td className="py-2.5 px-3 text-center">
                       <span
