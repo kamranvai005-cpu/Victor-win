@@ -16,7 +16,7 @@ export function CustomerServiceModal({ onClose }: CustomerServiceModalProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       sender: 'bot',
-      text: 'Hello! Welcome to HGNICE 24/7 VIP Customer Support. How can we assist you today regarding Deposit, Withdrawal, Win Go, or VIP Bonuses?',
+      text: 'Hello! Welcome to VICTOR WIN 24/7 VIP Customer Support. How can we assist you today regarding Deposit, Withdrawal, Win Go, or VIP Bonuses?',
       time: 'Just now',
     },
   ]);

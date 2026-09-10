@@ -2,7 +2,7 @@ import { Language } from '../types';
 
 export const t = {
   en: {
-    appName: 'HGNICE',
+    appName: 'Victor Win',
     slogan: 'Official Online Gaming & Sportsbook',
     balance: 'Balance',
     deposit: 'Deposit',
@@ -82,7 +82,7 @@ export const t = {
     dailyFreeWithdraw: 'Daily remaining free withdrawals: 3',
   },
   bn: {
-    appName: 'HGNICE',
+    appName: 'Victor Win',
     slogan: 'অফিসিয়াল অনলাইন গেমিং ও স্পোর্টসবুক',
     balance: 'ব্যালেন্স',
     deposit: 'ডিপোজিট',
@@ -162,7 +162,7 @@ export const t = {
     dailyFreeWithdraw: 'দৈনিক ফ্রি উইথড্র বাকি: ৩ বার',
   },
   hi: {
-    appName: 'HGNICE',
+    appName: 'Victor Win',
     slogan: 'ऑफिशियल ऑनलाइन गेमिंग एवं स्पोर्ट्सबुक',
     balance: 'बैलेंस',
     deposit: 'डिपॉजिट',

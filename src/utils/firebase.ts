@@ -773,7 +773,7 @@ export const DEFAULT_MEMBERS: RegisteredMember[] = [
     countryCode: '+880',
     balance: 2400.0,
     vipLevel: 2,
-    invitationCode: 'HGNICE888',
+    invitationCode: 'VICTOR888',
     gender: 'female',
     registeredAt: '2026-08-30',
     status: 'active',

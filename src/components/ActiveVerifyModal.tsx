@@ -30,7 +30,7 @@ export function ActiveVerifyModal({
   const [pinSet, setPinSet] = useState(true);
   const [bankLinked, setBankLinked] = useState(true);
   const [kycVerified, setKycVerified] = useState(false);
-  const [antiPhishCode, setAntiPhishCode] = useState('HGNICE-SAFE-88');
+  const [antiPhishCode, setAntiPhishCode] = useState('VICTOR-SAFE-88');
   const [showSuccessToast, setShowSuccessToast] = useState(false);
 
   const securityScore =

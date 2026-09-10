@@ -687,7 +687,7 @@ export function ActivityView({
                 type="text"
                 value={giftCode}
                 onChange={(e) => setGiftCode(e.target.value)}
-                placeholder="গিফট কোড লিখুন (যেমন: HGNICE888)"
+                placeholder="গিফট কোড লিখুন (যেমন: VICTOR888)"
                 className="flex-1 px-4 py-2.5 rounded-2xl bg-[#060e22] border border-blue-500/30 text-white placeholder-slate-500 font-mono text-xs sm:text-sm focus:outline-none focus:border-amber-400"
               />
               <button

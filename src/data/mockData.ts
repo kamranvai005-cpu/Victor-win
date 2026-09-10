@@ -15,7 +15,7 @@ export const INITIAL_USER = {
   isLoggedIn: false,
 };
 
-// Official Vendor Logos from HGNICE / BDTGame API
+// Official Vendor Logos from Victor / BDTGame API
 export const VENDOR_LOGOS = [
   { id: 18, name: 'JILI', code: 'JILI', img: 'https://ossimg.crhhh.com/bdtgame/vendorlogo/vendorlogo_20230725011022fnd1.png' },
   { id: 6, name: 'JDB', code: 'JDB', img: 'https://ossimg.crhhh.com/bdtgame/vendorlogo/vendorlogo_202311061658027sa6.png' },
@@ -101,7 +101,7 @@ export const OFFICIAL_LOTTERY_LIST = [
   },
 ];
 
-// Complete Games Catalogue parsed from BDTGame/HGNICE JSON Database
+// Complete Games Catalogue parsed from BDTGame/Victor JSON Database
 export const GAMES_CATALOGUE: GameItem[] = [
   // --- POPULAR & FEATURED ---
   {
@@ -353,7 +353,7 @@ export const GAMES_CATALOGUE: GameItem[] = [
     id: 'wingo-30s',
     title: 'Win Go 30S',
     category: 'lottery',
-    provider: 'HGNICE Lottery',
+    provider: 'Victor Lottery',
     providerCode: 'LOTTERY',
     image: 'https://ossimg.crhhh.com/bdtgame/lotterycategory/lotterycategory_20230725010909y1nq.png',
     rating: 4.9,
@@ -366,7 +366,7 @@ export const GAMES_CATALOGUE: GameItem[] = [
     id: 'k3-1m',
     title: 'K3 1Min',
     category: 'lottery',
-    provider: 'HGNICE Lottery',
+    provider: 'Victor Lottery',
     providerCode: 'LOTTERY',
     image: 'https://ossimg.crhhh.com/bdtgame/lotterycategory/lotterycategory_20230725010913mj7d.png',
     rating: 4.9,
@@ -379,7 +379,7 @@ export const GAMES_CATALOGUE: GameItem[] = [
     id: '5d-1m',
     title: '5D 1Min',
     category: 'lottery',
-    provider: 'HGNICE Lottery',
+    provider: 'Victor Lottery',
     providerCode: 'LOTTERY',
     image: 'https://ossimg.crhhh.com/bdtgame/lotterycategory/lotterycategory_20230725010917k23a.png',
     rating: 4.8,
@@ -404,7 +404,7 @@ export const GAMES_CATALOGUE: GameItem[] = [
     id: 'motorace-1m',
     title: 'MotoRace 1M',
     category: 'lottery',
-    provider: 'HGNICE Lottery',
+    provider: 'Victor Lottery',
     providerCode: 'LOTTERY',
     image: 'https://ossimg.crhhh.com/bdtgame/lotterycategory/lotterycategory_20250506012221lpd7.png',
     rating: 4.7,
@@ -417,7 +417,7 @@ export const GAMES_CATALOGUE: GameItem[] = [
     id: 'videowingo-3m',
     title: 'Video WinGo 3M',
     category: 'lottery',
-    provider: 'HGNICE Lottery',
+    provider: 'Victor Lottery',
     providerCode: 'LOTTERY',
     image: 'https://ossimg.crhhh.com/bdtgame/lotterycategory/lotterycategory_20250620113521afx3.png',
     rating: 4.8,
