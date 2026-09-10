@@ -443,12 +443,6 @@ export default function App() {
       setShowAuth({ open: true, mode: 'login' });
       return;
     }
-    const savedWallet = localStorage.getItem(`victor_wallet_${user.id || user.phone}`);
-    const hasWallet = user.withdrawalWallet?.isBound || !!savedWallet;
-    if (!hasWallet) {
-      setShowWalletNotice({ open: true, intent: 'withdraw' });
-      return;
-    }
     setShowWithdraw(true);
   };
 

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { sound } from '../utils/audio';
+import { isWalletNumberAlreadyUsed, saveUserWallet } from '../utils/firebase';
 
 interface WalletNoticeModalProps {
   isOpen: boolean;
@@ -55,13 +56,21 @@ export function WalletNoticeModal({
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!accountNumber || accountNumber.length < 10) {
-      setError('অনুগ্রহ করে সঠিক মোবাইল ওয়ালেট নম্বর লিখুন (ন্যূনতম ১০ ডিজিট)');
+    const cleanNum = accountNumber.replace(/\D/g, '');
+    if (!cleanNum || cleanNum.length < 11) {
+      setError('অনুগ্রহ করে সঠিক ১১ ডিজিটের মোবাইল ওয়ালেট নম্বর লিখুন (যেমন: 017xxxxxxxx)');
       sound.playLose();
       return;
     }
     if (!accountName.trim()) {
       setError('অনুগ্রহ করে ওয়ালেট হোল্ডারের পুরো নাম লিখুন');
+      sound.playLose();
+      return;
+    }
+
+    // Check unique number across all wallets in platform
+    if (isWalletNumberAlreadyUsed(cleanNum, currentWallet?.id)) {
+      setError('❌ এই নাম্বারটি ইতিমধ্যে অন্য একটি ওয়ালেটে ব্যবহৃত হয়েছে! একটি নাম্বার শুধুমাত্র একবার ব্যবহার করা যাবে।');
       sound.playLose();
       return;
     }
@@ -76,7 +85,7 @@ export function WalletNoticeModal({
 
       const newWallet = {
         method,
-        accountNumber: accountNumber.trim(),
+        accountNumber: cleanNum,
         accountName: accountName.trim(),
         isBound: true,
         boundAt: new Date().toISOString(),
@@ -203,18 +212,18 @@ export function WalletNoticeModal({
             </div>
           )}
 
-          {/* Submit button */}
+          {/* Submit button with Red and Green colors */}
           <button
             type="submit"
             disabled={isSaving}
-            className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-sm shadow-xl shadow-amber-950/50 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-emerald-600 hover:from-red-500 hover:to-emerald-500 text-white font-black text-sm shadow-xl shadow-red-950/50 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer border border-red-400/40"
           >
             {isSaving ? (
               <span>সংরক্ষণ হচ্ছে...</span>
             ) : (
               <>
                 <CheckCircle2 className="w-4 h-4" />
-                <span>ওয়ালেট সেভ করুন ও ডিপোজিট আনলক করুন</span>
+                <span>ওয়ালেট সংরক্ষণ করুন ও ডিপোজিট আনলক করুন</span>
               </>
             )}
           </button>

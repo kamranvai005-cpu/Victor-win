@@ -16,13 +16,17 @@ export interface UserProfile {
   isLoggedIn: boolean;
   email?: string;
   role?: 'admin' | 'user';
-  withdrawalWallet?: {
-    method: 'bkash' | 'nagad' | 'rocket' | 'upay' | 'bank';
-    accountNumber: string;
-    accountName: string;
-    isBound: boolean;
-    boundAt?: string;
-  };
+  withdrawalWallet?: UserBoundWallet;
+  withdrawalWallets?: UserBoundWallet[];
+}
+
+export interface UserBoundWallet {
+  id: string;
+  method: 'bkash' | 'nagad' | 'rocket' | 'upay' | 'bank';
+  accountNumber: string;
+  accountName: string;
+  isBound: boolean;
+  boundAt: string;
 }
 
 export type GameCategory = 

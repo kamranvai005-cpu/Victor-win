@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Clock,
   TrendingUp,
@@ -50,6 +50,11 @@ export function WinGoGame({
     initialDuration === 1 ? 60 : initialDuration === 3 ? 180 : initialDuration === 5 ? 300 : initialDuration === 10 ? 600 : 30
   );
 
+  const userBalanceRef = useRef(userBalance);
+  useEffect(() => {
+    userBalanceRef.current = userBalance;
+  }, [userBalance]);
+
   // Synchronized state from wall clock
   const [syncState, setSyncState] = useState(() => getRealtimeWinGo(durationSec, 10));
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
@@ -85,8 +90,8 @@ export function WinGoGame({
     const interval = setInterval(() => {
       const current = getRealtimeWinGo(durationSec, 10);
 
-      // Check countdown sound
-      if (current.timeLeft <= 5 && current.timeLeft >= 1) {
+      // Check countdown sound - only if page is visible and active
+      if (typeof document !== 'undefined' && !document.hidden && current.timeLeft <= 5 && current.timeLeft >= 1) {
         sound.playCountdown();
       }
 
@@ -107,34 +112,39 @@ export function WinGoGame({
                   let isWin = false;
                   let payout = 0;
 
+                  const sel = (bet.selection || '').toString().trim().toLowerCase();
+                  const endedSize = (endedDraw.size || '').toString().trim().toLowerCase();
+                  const endedNum = endedDraw.number;
+
                   if (bet.selectType === 'number') {
-                    if (parseInt(bet.selection) === endedDraw.number) {
+                    const parsedNum = Number(sel);
+                    if (!isNaN(parsedNum) && parsedNum === endedNum) {
                       isWin = true;
                       payout = bet.totalStake * 9 * 0.98;
                     }
                   } else if (bet.selectType === 'color') {
-                    if (bet.selection === 'violet' && (endedDraw.number === 0 || endedDraw.number === 5)) {
+                    if (sel === 'violet' && (endedNum === 0 || endedNum === 5)) {
                       isWin = true;
                       payout = bet.totalStake * 4.5 * 0.98;
-                    } else if (bet.selection === 'green') {
-                      if ([1, 3, 7, 9].includes(endedDraw.number)) {
+                    } else if (sel === 'green') {
+                      if ([1, 3, 7, 9].includes(endedNum)) {
                         isWin = true;
                         payout = bet.totalStake * 2 * 0.98;
-                      } else if (endedDraw.number === 5) {
+                      } else if (endedNum === 5) {
                         isWin = true;
                         payout = bet.totalStake * 1.5 * 0.98;
                       }
-                    } else if (bet.selection === 'red') {
-                      if ([2, 4, 6, 8].includes(endedDraw.number)) {
+                    } else if (sel === 'red') {
+                      if ([2, 4, 6, 8].includes(endedNum)) {
                         isWin = true;
                         payout = bet.totalStake * 2 * 0.98;
-                      } else if (endedDraw.number === 0) {
+                      } else if (endedNum === 0) {
                         isWin = true;
                         payout = bet.totalStake * 1.5 * 0.98;
                       }
                     }
                   } else if (bet.selectType === 'size') {
-                    if (bet.selection === endedDraw.size) {
+                    if (sel === endedSize) {
                       isWin = true;
                       payout = bet.totalStake * 2 * 0.98;
                     }
@@ -154,7 +164,9 @@ export function WinGoGame({
                 if (totalWon > 0) {
                   sound.playWin();
                   confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-                  onUpdateBalance(userBalance + totalWon);
+                  const newBal = userBalanceRef.current + totalWon;
+                  userBalanceRef.current = newBal;
+                  onUpdateBalance(newBal);
                   setWinModalData({ win: true, amount: totalWon, num: endedDraw.number, period: endedPeriod });
                 }
               }
@@ -168,7 +180,7 @@ export function WinGoGame({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [durationSec, userBalance]);
+  }, [durationSec, onUpdateBalance]);
 
   // Auto-close congratulations modal after 3.5 seconds
   useEffect(() => {

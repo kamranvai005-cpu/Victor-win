@@ -3,21 +3,40 @@ class SoundManager {
   private ctx: AudioContext | null = null;
   public enabled: boolean = true;
 
+  constructor() {
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden && this.ctx && this.ctx.state === 'running') {
+          this.ctx.suspend().catch(() => {});
+        } else if (!document.hidden && this.ctx && this.ctx.state === 'suspended' && this.enabled) {
+          this.ctx.resume().catch(() => {});
+        }
+      });
+    }
+  }
+
+  // Ensure sounds never play outside active tab / screen
+  private isTabVisible(): boolean {
+    if (typeof document === 'undefined') return true;
+    return !document.hidden;
+  }
+
   private initContext() {
+    if (!this.isTabVisible()) return;
     if (!this.ctx && typeof window !== 'undefined') {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
       }
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+    if (this.ctx && this.ctx.state === 'suspended' && !document.hidden) {
+      this.ctx.resume().catch(() => {});
     }
   }
 
   // Quick soft UI click
   playClick() {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.isTabVisible()) return;
     try {
       this.initContext();
       if (!this.ctx) return;
@@ -43,7 +62,7 @@ class SoundManager {
 
   // Coin chime / chip bet sound
   playChip() {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.isTabVisible()) return;
     try {
       this.initContext();
       if (!this.ctx) return;
@@ -70,7 +89,7 @@ class SoundManager {
 
   // Win fanfare / big payout sound
   playWin() {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.isTabVisible()) return;
     try {
       this.initContext();
       if (!this.ctx) return;
@@ -100,7 +119,7 @@ class SoundManager {
 
   // Countdown beep for final 5 seconds in Win Go
   playCountdown() {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.isTabVisible()) return;
     try {
       this.initContext();
       if (!this.ctx) return;
@@ -125,7 +144,7 @@ class SoundManager {
 
   // Aviator crash sound
   playCrash() {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.isTabVisible()) return;
     try {
       this.initContext();
       if (!this.ctx) return;
@@ -156,7 +175,7 @@ class SoundManager {
 
   // Soft failure or bust sound
   playFail() {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.isTabVisible()) return;
     try {
       this.initContext();
       if (!this.ctx) return;
@@ -187,7 +206,7 @@ class SoundManager {
 
   // Slot Reel Spin tick
   playSpinTick() {
-    if (!this.enabled) return;
+    if (!this.enabled || !this.isTabVisible()) return;
     try {
       this.initContext();
       if (!this.ctx) return;

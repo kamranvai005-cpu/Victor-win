@@ -129,6 +129,16 @@ export interface RegisteredMember {
     isBound: boolean;
     boundAt?: string;
   };
+  withdrawalWallets?: UserBoundWallet[];
+}
+
+export interface UserBoundWallet {
+  id: string;
+  method: 'bkash' | 'nagad' | 'rocket' | 'upay' | 'bank';
+  accountNumber: string;
+  accountName: string;
+  isBound: boolean;
+  boundAt: string;
 }
 
 export interface CommissionSettings {
@@ -1037,6 +1047,160 @@ export function subscribeMembers(onUpdate: (members: RegisteredMember[]) => void
     clearInterval(interval);
     unsubFirestore();
   };
+}
+
+// User Withdrawal Wallets Binding & Management (Max 2 Wallets per Account & Universal Uniqueness)
+export function getUserWallets(uidOrPhone: string): UserBoundWallet[] {
+  if (!uidOrPhone) return [];
+  try {
+    const raw = localStorage.getItem(`victor_wallets_${uidOrPhone}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+    // Check legacy single wallet
+    const legacy = localStorage.getItem(`victor_wallet_${uidOrPhone}`);
+    if (legacy) {
+      const p = JSON.parse(legacy);
+      if (p && p.accountNumber) {
+        const migrated: UserBoundWallet = {
+          id: 'w_' + Date.now(),
+          method: p.method || 'bkash',
+          accountNumber: p.accountNumber,
+          accountName: p.accountName || '',
+          isBound: true,
+          boundAt: p.boundAt || new Date().toISOString(),
+        };
+        localStorage.setItem(`victor_wallets_${uidOrPhone}`, JSON.stringify([migrated]));
+        return [migrated];
+      }
+    }
+  } catch (e) {}
+  return [];
+}
+
+export function isWalletNumberAlreadyUsed(accountNumber: string, currentWalletId?: string): boolean {
+  const cleanNumber = (accountNumber || '').replace(/\D/g, '');
+  if (!cleanNumber) return false;
+
+  // 1. Check all members in storage
+  const members = getLocalMembers();
+  for (const m of members) {
+    if (m.withdrawalWallets && Array.isArray(m.withdrawalWallets)) {
+      for (const w of m.withdrawalWallets) {
+        if (currentWalletId && w.id === currentWalletId) continue;
+        if ((w.accountNumber || '').replace(/\D/g, '') === cleanNumber) {
+          return true;
+        }
+      }
+    }
+    if (m.withdrawalWallet && (m.withdrawalWallet.accountNumber || '').replace(/\D/g, '') === cleanNumber) {
+      return true;
+    }
+  }
+
+  // 2. Check all victor_wallets_* keys in localStorage
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('victor_wallets_')) {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const arr: UserBoundWallet[] = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            for (const w of arr) {
+              if (currentWalletId && w.id === currentWalletId) continue;
+              if ((w.accountNumber || '').replace(/\D/g, '') === cleanNumber) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  return false;
+}
+
+export function saveUserWallet(
+  uidOrPhone: string,
+  wallet: Omit<UserBoundWallet, 'id' | 'boundAt' | 'isBound'> & { id?: string; boundAt?: string; isBound?: boolean }
+): { success: boolean; message: string; wallet?: UserBoundWallet } {
+  const currentWallets = getUserWallets(uidOrPhone);
+  const cleanNumber = (wallet.accountNumber || '').replace(/\D/g, '');
+
+  if (!cleanNumber || cleanNumber.length < 11) {
+    return { success: false, message: 'অনুগ্রহ করে সঠিক ১১ ডিজিটের মোবাইল ব্যাংকিং নম্বর লিখুন (যেমন: 017xxxxxxxx)।' };
+  }
+
+  // Check 2 wallets limit per account
+  const isEditing = wallet.id && currentWallets.some((w) => w.id === wallet.id);
+  if (!isEditing && currentWallets.length >= 2) {
+    return { success: false, message: 'একটি অ্যাকাউন্টে সর্বোচ্চ ২টি ওয়ালেট সেট করা যাবে।' };
+  }
+
+  // Check unique phone number rule across entire platform!
+  if (isWalletNumberAlreadyUsed(cleanNumber, wallet.id)) {
+    return {
+      success: false,
+      message: '❌ এই নাম্বারটি ইতিমধ্যে সিস্টেমে ব্যবহৃত হয়েছে! একটি নাম্বার শুধুমাত্র একবার ব্যবহার করা যাবে।',
+    };
+  }
+
+  const walletItem: UserBoundWallet = {
+    id: wallet.id || 'w_' + Date.now(),
+    method: wallet.method,
+    accountNumber: cleanNumber,
+    accountName: (wallet.accountName || '').trim(),
+    isBound: true,
+    boundAt: wallet.boundAt || new Date().toISOString(),
+  };
+
+  let updatedWallets: UserBoundWallet[];
+  if (isEditing) {
+    updatedWallets = currentWallets.map((w) => (w.id === walletItem.id ? walletItem : w));
+  } else {
+    updatedWallets = [...currentWallets, walletItem];
+  }
+
+  try {
+    localStorage.setItem(`victor_wallets_${uidOrPhone}`, JSON.stringify(updatedWallets));
+    localStorage.setItem(`victor_wallet_${uidOrPhone}`, JSON.stringify(walletItem));
+  } catch (e) {}
+
+  // Update member
+  const members = getLocalMembers();
+  const mIndex = members.findIndex((m) => m.uid === uidOrPhone || m.phone === uidOrPhone);
+  if (mIndex >= 0) {
+    members[mIndex].withdrawalWallet = walletItem;
+    members[mIndex].withdrawalWallets = updatedWallets;
+    saveLocalMember(members[mIndex]);
+  }
+
+  return { success: true, message: 'ওয়ালেট সফলভাবে সংরক্ষিত হয়েছে!', wallet: walletItem };
+}
+
+export function deleteUserWallet(uidOrPhone: string, walletId: string): { success: boolean } {
+  const currentWallets = getUserWallets(uidOrPhone);
+  const updated = currentWallets.filter((w) => w.id !== walletId);
+  try {
+    localStorage.setItem(`victor_wallets_${uidOrPhone}`, JSON.stringify(updated));
+    if (updated.length > 0) {
+      localStorage.setItem(`victor_wallet_${uidOrPhone}`, JSON.stringify(updated[0]));
+    } else {
+      localStorage.removeItem(`victor_wallet_${uidOrPhone}`);
+    }
+  } catch (e) {}
+
+  const members = getLocalMembers();
+  const mIndex = members.findIndex((m) => m.uid === uidOrPhone || m.phone === uidOrPhone);
+  if (mIndex >= 0) {
+    members[mIndex].withdrawalWallets = updated;
+    members[mIndex].withdrawalWallet = updated.length > 0 ? updated[0] : undefined;
+    saveLocalMember(members[mIndex]);
+  }
+  return { success: true };
 }
 
 // Live Firebase Connection Check
